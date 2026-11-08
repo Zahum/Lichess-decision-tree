@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.3.2
+// @version      2.4.0
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -33,7 +33,7 @@
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.3.2';
+  const VERSION = '2.4.0';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -282,7 +282,14 @@
       grp.appendChild(button('▸ Collapse all', () => setCollapsed(foldable)));
       grp.appendChild(button('▾ Expand all', () => setCollapsed([])));
     }
-    if (data.root.children.length) grp.appendChild(button('▶ Practice', () => startPractice(data)));
+    if (data.root.children.length) {
+      const sc = practiceScope(data);
+      const all = sc.leaves.length === countLeaves(data, data.root);
+      const txt = all ? '▶ Practice all' : `▶ Practice: ${sc.name} (${sc.leaves.length} ${sc.leaves.length === 1 ? 'line' : 'lines'})`;
+      const btn = button(txt, () => startPractice(data));
+      btn.title = all ? 'Practise every line of this chapter' : 'Practise only the lines below the move you are on. Go to the first move to practise everything.';
+      grp.appendChild(btn);
+    }
     grp.appendChild(button(treeOn ? 'Show Lichess list' : 'Show decision tree', () => {
       treeOn = !treeOn;
       store.set(KEYS.treeOn, treeOn ? '1' : '0');
@@ -413,18 +420,49 @@
   // =====================================================================
   // PRACTICE MODE
   // =====================================================================
+  // the lines below the move you are on (all lines when you are on the first row's start)
+  function leavesUnder(data, node) {
+    const out = [];
+    (function collect(n) {
+      if (!n.children.length) { if (n !== data.root) out.push(n.p); return; }
+      n.children.forEach(collect);
+    })(node);
+    return out;
+  }
+  function countLeaves(data, node) { return leavesUnder(data, node).length; }
+  function practiceScope(data) {
+    let path = data.active || '';
+    let node = path ? data.nodes.get(path) : data.root;
+    if (!node) { path = ''; node = data.root; }
+    const leaves = leavesUnder(data, node);
+    if (leaves.length === countLeaves(data, data.root)) return { path: '', leaves, name: 'all lines' };
+    // 1) a name in the move's own row (the run of moves between two branch points)
+    let rowStart = node;
+    while (rowStart.parent && rowStart.parent !== data.root && rowStart.parent.children.length === 1) rowStart = rowStart.parent;
+    let name = '';
+    for (let n = rowStart; ; n = n.children[0]) {
+      if (n.label) { name = n.label; break; }
+      if (n.children.length !== 1) break;
+    }
+    // 2) otherwise the nearest name above, plus the move that starts this row
+    if (!name) {
+      let above = '';
+      for (let n = rowStart.parent; n && n !== data.root; n = n.parent) if (n.label) { above = n.label; break; }
+      const mv = moveText(rowStart.san, data.rootPly + rowStart.depth);
+      name = above ? above + ' · ' + mv : 'after ' + mv;
+    }
+    return { path, leaves, name };
+  }
+
   function startPractice(data) {
     const wrap = document.querySelector('.main-board .cg-wrap') || document.querySelector('.cg-wrap');
     const side = wrap && wrap.classList.contains('orientation-black') ? 'black' : 'white';
-    const leaves = [];
-    (function collect(n) {
-      if (!n.children.length) { if (n !== data.root) leaves.push(n.p); return; }
-      n.children.forEach(collect);
-    })(data.root);
+    const scope = practiceScope(data);
+    const leaves = scope.leaves;
     if (!leaves.length) return;
 
     practice = {
-      snap: data, side, leaves,
+      snap: data, side, leaves, scope,
       order: ORDERS[store.get(KEYS.order, 'tree')] ? store.get(KEYS.order, 'tree') : 'tree',
       comments: store.get(KEYS.comments, '1') !== '0',
       queue: [], idx: 0, results: new Map(),
@@ -523,7 +561,13 @@
     }
     const isChild = active.length === p.cur.length + 2 && active.startsWith(p.cur);
     if (isChild && !p.browsing && !p.roundDone && nodeOf(p.cur).children.length) {
-      if (p.snap.nodes.has(active)) {
+      if (p.snap.nodes.has(active) && !p.queue.some(l => l === active || l.startsWith(active))) {
+        // in the repertoire, but outside the lines being practised
+        p.keepFeedback = true;
+        p.feedback = { type: 'warn', text: '↩ That move is in your repertoire, but outside "' + p.scope.name + '". Play the move for this line.' };
+        jumpTo(p.cur);
+        bump();
+      } else if (p.snap.nodes.has(active)) {
         // a move from the repertoire: follow it (and switch lines if it is another branch)
         p.cur = active;
         if (!p.target.startsWith(active)) retarget(active);
@@ -611,7 +655,7 @@
     box.textContent = '';
 
     const bar = el('div', 'ldt-bar');
-    const title = el('b', '', 'Practice · ' + (p.side === 'white' ? 'White' : 'Black'));
+    const title = el('b', '', 'Practice · ' + (p.side === 'white' ? 'White' : 'Black') + (p.scope.path ? ' · ' + p.scope.name : ''));
     title.appendChild(el('span', 'ldt-ver', ' v' + VERSION));
     bar.appendChild(title);
     const grp = el('span', 'ldt-grp');

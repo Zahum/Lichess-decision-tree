@@ -24,7 +24,9 @@ Lichess's own move list stays in the page (hidden), so the explorer, engine, edi
 
 ## Practice mode
 
-Click **▶ Practice** to drill every line of the chapter, all variations in one chapter.
+Click **▶ Practice** to drill the lines of the chapter.
+
+**What gets practised depends on where you are in the tree:** on the first move (or with nothing selected) the button says **▶ Practice all**; on a move further down, e.g. `3.d4` of the Scotch, it says **▶ Practice: Scotch game (2 lines)** and drills only the lines below that move. Each line still starts from move 1; the opponent steers into the chosen lines, and a repertoire move outside them is taken back without counting as a mistake.
 
 ![Practice mode](images/practice.png)
 
