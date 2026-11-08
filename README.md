@@ -17,7 +17,7 @@ Lichess's own move list stays in the page (hidden), so the explorer, engine, edi
 
 - **Name a line** by starting a move's comment with the name in square brackets, e.g. `[Scotch game] White pushes straight for the center`. The name shows as a label at the end of that row, and the brackets disappear from the comment. Because the name lives in the study, it shows on every computer, in shared studies and in PGN exports.
 - **Collapse a line:** hover over a row and click **▾** to hide the choices below it; **▸ 2 lines** shows what is hidden. **Collapse all / Expand all** at the top fold or unfold the whole tree. The setting is remembered per chapter, and a collapsed line opens by itself while you are on one of its moves.
-- **Colours per level:** each level of the tree has its own colour (line names and the move number that starts each row), so unnamed lines are easy to place too.
+- **Colours per level:** from the second row down, each level of the tree has its own colour (line names and the move number that starts each row), so unnamed lines are easy to place too. The top row stays neutral.
 - In practice mode, a line's name appears once the named move has been played (so it never gives the answer away).
 
 ![Line names, colours per level and a collapsed line](images/names-collapse.png)

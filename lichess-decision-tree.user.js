@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.3.1
+// @version      2.3.2
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -33,7 +33,7 @@
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.3.1';
+  const VERSION = '2.3.2';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -128,10 +128,12 @@
     .ldt-tag {
       display: inline-block; margin-left: 6px; padding: 0 8px; border-radius: 9px;
       font-size: 11px; font-weight: 600; line-height: 1.65; vertical-align: 1px;
-      background: color-mix(in srgb, var(--ldt-lv, #4f9cf0) 18%, transparent);
-      color: var(--ldt-lv, #4f9cf0);
+      background: rgba(128, 128, 128, 0.18); color: var(--c-font, #bababa);
     }
-    .ldt-row > .ldt-mv:first-child:not(.active) .ldt-ix { color: var(--ldt-lv, #8a8a8a); font-weight: 700; }
+    .ldt-row.ldt-colored .ldt-tag {
+      background: color-mix(in srgb, var(--ldt-lv) 18%, transparent); color: var(--ldt-lv);
+    }
+    .ldt-row.ldt-colored > .ldt-mv:first-child:not(.active) .ldt-ix { color: var(--ldt-lv); font-weight: 700; }
     .ldt-fold {
       display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; cursor: pointer;
       font-size: 11px; line-height: 1.55; vertical-align: 1px; user-select: none;
@@ -143,9 +145,9 @@
   `;
   document.head.appendChild(style);
 
-  // one colour per tree level (cycles after the last one)
+  // one colour per tree level, starting below the top row (cycles after the last one)
   const LEVEL_COLORS = ['#4f9cf0', '#3db36f', '#d65cd6', '#e8833a', '#e05555', '#2bb3b3'];
-  const levelColor = lv => LEVEL_COLORS[lv % LEVEL_COLORS.length];
+  const levelColor = lv => (lv < 1 ? null : LEVEL_COLORS[(lv - 1) % LEVEL_COLORS.length]);
 
   const GLYPH_CLASS = { '!': 'good', '!!': 'brilliant', '!?': 'interesting', '?!': 'inaccuracy', '?': 'mistake', '??': 'blunder' };
 
@@ -341,7 +343,8 @@
     const shown = withComments.find(m => m.p === active) || withComments[0] || null;
 
     const row = el('div', 'ldt-row');
-    row.style.setProperty('--ldt-lv', levelColor(level));
+    const color = levelColor(level);
+    if (color) { row.classList.add('ldt-colored'); row.style.setProperty('--ldt-lv', color); }
     moves.forEach((m, i) => row.appendChild(moveEl(m, i === 0, data.rootPly, active, shown)));
     // line names as labels at the end of the row
     for (const m of moves) if (m.label) row.appendChild(el('span', 'ldt-tag', m.label));
