@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.2.0
+// @version      2.3.0
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -33,7 +33,7 @@
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.2.0';
+  const VERSION = '2.3.0';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -72,12 +72,12 @@
     .ldt-tree li { position: relative; padding-left: 16px; }
     .ldt-tree li::before {
       content: ''; position: absolute; left: 0; top: 0; bottom: 0;
-      border-left: 2px solid rgba(140, 140, 140, 0.45);
+      border-left: 2px solid color-mix(in srgb, var(--ldt-lv, #8c8c8c) 50%, transparent);
     }
     .ldt-tree li:last-child::before { bottom: auto; height: 0.85em; }
     .ldt-tree li::after {
       content: ''; position: absolute; left: 0; top: 0.85em; width: 11px;
-      border-top: 2px solid rgba(140, 140, 140, 0.45);
+      border-top: 2px solid color-mix(in srgb, var(--ldt-lv, #8c8c8c) 50%, transparent);
     }
     .ldt-row { padding: 1px 0 4px; }
     .ldt-mv {
@@ -128,8 +128,10 @@
     .ldt-tag {
       display: inline-block; margin-left: 6px; padding: 0 8px; border-radius: 9px;
       font-size: 11px; font-weight: 600; line-height: 1.65; vertical-align: 1px;
-      background: rgba(54, 146, 231, 0.16); color: var(--c-primary, #3692e7);
+      background: color-mix(in srgb, var(--ldt-lv, #4f9cf0) 18%, transparent);
+      color: var(--ldt-lv, #4f9cf0);
     }
+    .ldt-row > .ldt-mv:first-child:not(.active) .ldt-ix { color: var(--ldt-lv, #8a8a8a); font-weight: 700; }
     .ldt-fold {
       display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; cursor: pointer;
       font-size: 11px; line-height: 1.55; vertical-align: 1px; user-select: none;
@@ -140,6 +142,10 @@
     .ldt-row:hover .ldt-fold.open { opacity: 1; }
   `;
   document.head.appendChild(style);
+
+  // one colour per tree level (cycles after the last one)
+  const LEVEL_COLORS = ['#4f9cf0', '#3db36f', '#d65cd6', '#e8833a', '#e05555', '#2bb3b3'];
+  const levelColor = lv => LEVEL_COLORS[lv % LEVEL_COLORS.length];
 
   const GLYPH_CLASS = { '!': 'good', '!!': 'brilliant', '!?': 'interesting', '?!': 'inaccuracy', '?': 'mistake', '??': 'blunder' };
 
@@ -317,13 +323,13 @@
     const tree = el('div', 'ldt-tree');
     if (data.root.comments.length) tree.appendChild(commentEl(data.root.comments));
     const first = data.root.children;
-    if (first.length === 1) tree.append(...segment(first[0], data, active));
-    else if (first.length > 1) tree.appendChild(branchList(first, data, active));
+    if (first.length === 1) tree.append(...segment(first[0], data, active, 0));
+    else if (first.length > 1) tree.appendChild(branchList(first, data, active, 0));
     return tree;
   }
 
   // one row = a run of moves until the next choice; then the choices as a list
-  function segment(start, data, active) {
+  function segment(start, data, active, level) {
     const moves = [];
     let cur = start;
     for (;;) {
@@ -335,6 +341,7 @@
     const shown = withComments.find(m => m.p === active) || withComments[0] || null;
 
     const row = el('div', 'ldt-row');
+    row.style.setProperty('--ldt-lv', levelColor(level));
     moves.forEach((m, i) => row.appendChild(moveEl(m, i === 0, data.rootPly, active, shown)));
     // line names as labels at the end of the row
     for (const m of moves) if (m.label) row.appendChild(el('span', 'ldt-tag', m.label));
@@ -351,7 +358,7 @@
     }
     const out = [row];
     if (shown) out.push(commentEl(shown.comments));
-    if (hasChoices && !folded) out.push(branchList(cur.children, data, active));
+    if (hasChoices && !folded) out.push(branchList(cur.children, data, active, level + 1));
     return out;
   }
 
@@ -359,11 +366,12 @@
     return node.children.length ? node.children.reduce((s, c) => s + countLines(c), 0) : 1;
   }
 
-  function branchList(children, data, active) {
+  function branchList(children, data, active, level) {
     const ul = el('ul');
     for (const child of children) {
       const li = el('li');
-      li.append(...segment(child, data, active));
+      li.style.setProperty('--ldt-lv', levelColor(level));
+      li.append(...segment(child, data, active, level));
       ul.appendChild(li);
     }
     return ul;
