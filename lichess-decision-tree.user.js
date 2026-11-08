@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.1.0
+// @version      2.2.0
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -33,7 +33,7 @@
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.1.0';
+  const VERSION = '2.2.0';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -269,6 +269,11 @@
     const bar = el('div', 'ldt-bar');
     bar.appendChild(el('span', '', treeOn ? 'Decision tree' : ''));
     const grp = el('span', 'ldt-grp');
+    const foldable = treeOn ? foldablePaths(data) : [];
+    if (foldable.length) {
+      grp.appendChild(button('▸ Collapse all', () => setCollapsed(foldable)));
+      grp.appendChild(button('▾ Expand all', () => setCollapsed([])));
+    }
     if (data.root.children.length) grp.appendChild(button('▶ Practice', () => startPractice(data)));
     grp.appendChild(button(treeOn ? 'Show Lichess list' : 'Show decision tree', () => {
       treeOn = !treeOn;
@@ -283,6 +288,22 @@
   function collapsedKey() { return KEYS.collapsed + location.pathname; }
   function loadCollapsed() {
     try { return new Set(JSON.parse(store.get(collapsedKey(), '[]'))); } catch (e) { return new Set(); }
+  }
+  function setCollapsed(paths) {
+    store.set(collapsedKey(), JSON.stringify(paths));
+    schedule(true);
+  }
+  // every row that has choices below it (rows are keyed by their first move)
+  function foldablePaths(data) {
+    const out = [];
+    (function walk(children) {
+      for (const start of children) {
+        let end = start;
+        while (end.children.length === 1) end = end.children[0];
+        if (end.children.length > 1) { out.push(start.p); walk(end.children); }
+      }
+    })(data.root.children.length === 1 ? [data.root.children[0]] : data.root.children);
+    return out;
   }
   function toggleCollapsed(path) {
     const set = loadCollapsed();
