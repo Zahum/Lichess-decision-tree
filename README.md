@@ -2,8 +2,6 @@
 
 A userscript that shows the move list of **Lichess analysis boards and studies as a decision tree** and adds a **practice mode** that drills every line of a chapter. Built for studying openings with many variations in one chapter.
 
-![Decision tree in a Lichess study](images/decision-tree.png)
-
 ## What it does
 
 - **Every option at a branch point sits on the same level.** After `2.Nf3`, the replies `2...Nc6`, `2...d5` and `2...Bc5` are equal siblings, with no privileged "main line".
