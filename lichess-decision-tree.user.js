@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.0.0
+// @version      2.0.1
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -637,9 +637,22 @@
     practice.expecting = path;
     if (path === '') {
       // the Home key takes Lichess back to the starting position
+      // (sent from <body>: Lichess's shortcut handler inspects the element the key came from)
       for (const type of ['keydown', 'keyup']) {
-        document.dispatchEvent(new KeyboardEvent(type, { key: 'Home', code: 'Home', bubbles: true }));
+        document.body.dispatchEvent(new KeyboardEvent(type, { key: 'Home', code: 'Home', bubbles: true, cancelable: true }));
       }
+      // backup: press Lichess's "first move" button if the board hasn't moved yet
+      const p = practice;
+      setTimeout(() => {
+        if (practice !== p || p.expecting !== '') return;
+        const tview = document.querySelector('.analyse__moves .tview2');
+        if (tview && !tview.querySelector('move.active')) return; // already there
+        const first = document.querySelector('.analyse__controls [data-act="first"]');
+        if (!first) return;
+        const opts = { bubbles: true, cancelable: true, button: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+        first.dispatchEvent(new PointerEvent('pointerdown', opts));
+        first.dispatchEvent(new PointerEvent('pointerup', opts));
+      }, 400);
       return;
     }
     const target = [...document.querySelectorAll('.analyse__moves .tview2 move[p]')]
