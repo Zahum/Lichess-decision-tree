@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.0.1
+// @version      2.0.2
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -32,7 +32,9 @@
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
+  const VERSION = '2.0.2';
   const OPPONENT_DELAY = 450;
+  const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
 
   let treeOn = store.get(KEYS.treeOn, '1') !== '0';
@@ -121,6 +123,7 @@
     .ldt-btns { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px 10px; border-top: 1px solid rgba(128, 128, 128, 0.25); }
     .ldt-btns button { flex: 1 1 22%; font-size: 12px; padding: 5px 4px; }
     .ldt-ptree { border-top: 1px solid rgba(128, 128, 128, 0.25); }
+    .ldt-ver { font-weight: 400; font-size: 10px; color: var(--c-font-dimmer, #777); }
   `;
   document.head.appendChild(style);
 
@@ -349,7 +352,7 @@
       queue: [], idx: 0, results: new Map(),
       target: null, cur: '', mistakes: 0, revealed: false,
       expecting: null, feedback: null, browsing: false, showTree: false,
-      roundDone: false, junk: false, recRestore: false, timer: 0, version: 0, keepFeedback: false,
+      roundDone: false, junk: false, recRestore: false, timer: 0, version: 0, keepFeedback: false, resetStuck: false,
     };
     switchRecOff();
     buildQueue();
@@ -430,6 +433,7 @@
     if (p.expecting !== null) {
       if (active !== p.expecting) return; // still waiting for Lichess to get there
       p.expecting = null;
+      p.resetStuck = false;
       p.cur = active;
       p.browsing = false;
       arrive();
@@ -529,7 +533,9 @@
     box.textContent = '';
 
     const bar = el('div', 'ldt-bar');
-    bar.appendChild(el('b', '', 'Practice · ' + (p.side === 'white' ? 'White' : 'Black')));
+    const title = el('b', '', 'Practice · ' + (p.side === 'white' ? 'White' : 'Black'));
+    title.appendChild(el('span', 'ldt-ver', ' v' + VERSION));
+    bar.appendChild(title);
     const grp = el('span', 'ldt-grp');
     const sel = el('select');
     for (const [k, v] of Object.entries(ORDERS)) {
@@ -592,7 +598,11 @@
     if (p.comments && node && node.comments.length) box.appendChild(commentEl(node.comments, 'ldt-pcm'));
 
     // feedback
-    if (p.browsing) {
+    if (p.resetStuck && p.expecting === '') {
+      const fb = el('div', 'ldt-fb warn', 'The board didn\'t go back to the start. Click ⏮ under the board (or press Home) and practice continues.');
+      fb.appendChild(button('Retry', () => { p.resetStuck = false; jumpTo(''); bump(); }));
+      box.appendChild(fb);
+    } else if (p.browsing) {
       const fb = el('div', 'ldt-fb warn', 'You\'re looking at another position.');
       fb.appendChild(button('Continue practice', () => { p.browsing = false; jumpTo(p.cur); bump(); }));
       box.appendChild(fb);
@@ -636,23 +646,36 @@
     if (!practice) return;
     practice.expecting = path;
     if (path === '') {
-      // the Home key takes Lichess back to the starting position
-      // (sent from <body>: Lichess's shortcut handler inspects the element the key came from)
-      for (const type of ['keydown', 'keyup']) {
-        document.body.dispatchEvent(new KeyboardEvent(type, { key: 'Home', code: 'Home', bubbles: true, cancelable: true }));
-      }
-      // backup: press Lichess's "first move" button if the board hasn't moved yet
       const p = practice;
-      setTimeout(() => {
-        if (practice !== p || p.expecting !== '') return;
+      const atStart = () => {
         const tview = document.querySelector('.analyse__moves .tview2');
-        if (tview && !tview.querySelector('move.active')) return; // already there
+        return tview && !tview.querySelector('move.active');
+      };
+      if (atStart()) return; // nothing to do, the next update sees we are there
+      // 1) the Home key, sent from <body> (Lichess's shortcut handler inspects the element the key came from)
+      const ae = document.activeElement;
+      const keyTarget = ae && ae !== document.body && ae.hasAttribute &&
+        !/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) ? ae : document.body;
+      for (const type of ['keydown', 'keyup']) {
+        keyTarget.dispatchEvent(new KeyboardEvent(type, { key: 'Home', code: 'Home', bubbles: true, cancelable: true }));
+      }
+      // 2) Lichess's "first move" button, if the board hasn't moved yet
+      setTimeout(() => {
+        if (practice !== p || p.expecting !== '' || atStart()) return;
         const first = document.querySelector('.analyse__controls [data-act="first"]');
-        if (!first) return;
-        const opts = { bubbles: true, cancelable: true, button: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true };
-        first.dispatchEvent(new PointerEvent('pointerdown', opts));
-        first.dispatchEvent(new PointerEvent('pointerup', opts));
+        if (first) {
+          const opts = { bubbles: true, cancelable: true, button: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+          first.dispatchEvent(new PointerEvent('pointerdown', opts));
+          first.dispatchEvent(new PointerEvent('pointerup', opts));
+        }
       }, 400);
+      // 3) still not there: ask the user (practice continues as soon as the board is at the start)
+      setTimeout(() => {
+        if (practice !== p || p.expecting !== '' || atStart()) return;
+        console.warn('[decision tree] could not return the board to the start automatically');
+        p.resetStuck = true;
+        bump();
+      }, RESET_TIMEOUT);
       return;
     }
     const target = [...document.querySelectorAll('.analyse__moves .tview2 move[p]')]
