@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.3.0
+// @version      2.3.1
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -33,7 +33,7 @@
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.3.0';
+  const VERSION = '2.3.1';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -72,12 +72,12 @@
     .ldt-tree li { position: relative; padding-left: 16px; }
     .ldt-tree li::before {
       content: ''; position: absolute; left: 0; top: 0; bottom: 0;
-      border-left: 2px solid color-mix(in srgb, var(--ldt-lv, #8c8c8c) 50%, transparent);
+      border-left: 2px solid rgba(140, 140, 140, 0.45);
     }
     .ldt-tree li:last-child::before { bottom: auto; height: 0.85em; }
     .ldt-tree li::after {
       content: ''; position: absolute; left: 0; top: 0.85em; width: 11px;
-      border-top: 2px solid color-mix(in srgb, var(--ldt-lv, #8c8c8c) 50%, transparent);
+      border-top: 2px solid rgba(140, 140, 140, 0.45);
     }
     .ldt-row { padding: 1px 0 4px; }
     .ldt-mv {
@@ -370,7 +370,6 @@
     const ul = el('ul');
     for (const child of children) {
       const li = el('li');
-      li.style.setProperty('--ldt-lv', levelColor(level));
       li.append(...segment(child, data, active, level));
       ul.appendChild(li);
     }
