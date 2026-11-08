@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.5.0
+// @version      2.5.1
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -33,7 +33,7 @@
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.5.0';
+  const VERSION = '2.5.1';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -52,9 +52,11 @@
     .ldt-forktag {
       pointer-events: none; display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 9px;
       font-size: 11px; font-weight: 600; line-height: 1.6; align-self: center;
-      background: rgba(128, 128, 128, 0.22); color: var(--c-font, #bababa);
+      /* solid background, so the label stays readable on the highlighted (selected) button */
+      background: color-mix(in srgb, #808080 22%, var(--c-bg-box, #262421)); color: var(--c-font, #bababa);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
     }
-    .ldt-forktag.ldt-colored { background: color-mix(in srgb, var(--ldt-lv) 20%, transparent); color: var(--ldt-lv); }
+    .ldt-forktag.ldt-colored { background: color-mix(in srgb, var(--ldt-lv) 24%, var(--c-bg-box, #262421)); color: var(--ldt-lv); }
     .ldt-box { font-size: 14px; }
     .ldt-bar {
       position: sticky; top: 0; z-index: 2;
