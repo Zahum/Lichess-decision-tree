@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.0.2
+// @version      2.1.0
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -28,11 +28,12 @@
     order: 'ldt-order',
     comments: 'ldt-comments',
     recRestore: 'ldt-rec-restore',
+    collapsed: 'ldt-collapsed:',
     sr: 'ldt-sr:',
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.0.2';
+  const VERSION = '2.1.0';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -124,6 +125,19 @@
     .ldt-btns button { flex: 1 1 22%; font-size: 12px; padding: 5px 4px; }
     .ldt-ptree { border-top: 1px solid rgba(128, 128, 128, 0.25); }
     .ldt-ver { font-weight: 400; font-size: 10px; color: var(--c-font-dimmer, #777); }
+    .ldt-tag {
+      display: inline-block; margin-left: 6px; padding: 0 8px; border-radius: 9px;
+      font-size: 11px; font-weight: 600; line-height: 1.65; vertical-align: 1px;
+      background: rgba(54, 146, 231, 0.16); color: var(--c-primary, #3692e7);
+    }
+    .ldt-fold {
+      display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; cursor: pointer;
+      font-size: 11px; line-height: 1.55; vertical-align: 1px; user-select: none;
+      color: var(--c-font-dim, #8a8a8a); border: 1px solid rgba(128, 128, 128, 0.35);
+    }
+    .ldt-fold:hover { background: rgba(128, 128, 128, 0.18); }
+    .ldt-fold.open { opacity: 0.25; transition: opacity 0.15s; }
+    .ldt-row:hover .ldt-fold.open { opacity: 1; }
   `;
   document.head.appendChild(style);
 
@@ -177,7 +191,7 @@
 
   // ---------- read Lichess's move list ----------
   function parseMoveList(tview) {
-    const root = { p: '', san: '', glyphs: [], children: [], comments: [], depth: 0 };
+    const root = { p: '', san: '', glyphs: [], children: [], comments: [], label: '', depth: 0 };
     const nodes = new Map();
     const order = [];
     let active = null;
@@ -197,6 +211,7 @@
             glyphs: [...el.querySelectorAll('glyph')].map(g => g.textContent.trim()).filter(Boolean),
             children: [],
             comments: [],
+            label: '',
             depth: p.length / 2,
           };
           nodes.set(p, node);
@@ -212,7 +227,10 @@
         last = node;
       } else {
         const parts = [...el.querySelectorAll(':scope > span:not(.by)')].map(s => s.textContent.trim());
-        const text = parts.join(' ').trim() || el.textContent.trim();
+        let text = parts.join(' ').trim() || el.textContent.trim();
+        // a comment starting with [Name] names the line: "[Scotch game] White pushes..."
+        const named = text.match(/^\[([^\[\]]{1,60})\]\s*([\s\S]*)$/);
+        if (named) { last.label = named[1].trim(); text = named[2].trim(); }
         if (text) last.comments.push(text);
       }
     }
@@ -239,7 +257,7 @@
     }
 
     const signature = order
-      .map(n => n.p + '\u0001' + n.san + '\u0001' + n.glyphs.join('') + '\u0001' + n.comments.join('\u0002'))
+      .map(n => n.p + '\u0001' + n.san + '\u0001' + n.glyphs.join('') + '\u0001' + n.label + '\u0001' + n.comments.join('\u0002'))
       .join('\u0003') + '\u0004' + active + '\u0004' + root.comments.join('\u0002') + '\u0004' + rootPly;
 
     return { root, nodes, active, rootPly, signature };
@@ -262,7 +280,19 @@
     if (treeOn) box.appendChild(treeEl(data, data.active));
   }
 
+  function collapsedKey() { return KEYS.collapsed + location.pathname; }
+  function loadCollapsed() {
+    try { return new Set(JSON.parse(store.get(collapsedKey(), '[]'))); } catch (e) { return new Set(); }
+  }
+  function toggleCollapsed(path) {
+    const set = loadCollapsed();
+    if (set.has(path)) set.delete(path); else set.add(path);
+    store.set(collapsedKey(), JSON.stringify([...set]));
+    schedule(true);
+  }
+
   function treeEl(data, active) {
+    data.collapsed = loadCollapsed();
     const tree = el('div', 'ldt-tree');
     if (data.root.comments.length) tree.appendChild(commentEl(data.root.comments));
     const first = data.root.children;
@@ -285,10 +315,27 @@
 
     const row = el('div', 'ldt-row');
     moves.forEach((m, i) => row.appendChild(moveEl(m, i === 0, data.rootPly, active, shown)));
+    // line names as labels at the end of the row
+    for (const m of moves) if (m.label) row.appendChild(el('span', 'ldt-tag', m.label));
+    // collapse / expand the choices below this row (stays open while you are inside it)
+    const hasChoices = cur.children.length > 1;
+    const insideNow = !!active && active.length > cur.p.length && active.startsWith(cur.p);
+    const folded = hasChoices && data.collapsed && data.collapsed.has(start.p) && !insideNow;
+    if (hasChoices) {
+      const n = countLines(cur);
+      const fold = el('span', 'ldt-fold' + (folded ? '' : ' open'), folded ? '▸ ' + n + (n === 1 ? ' line' : ' lines') : '▾');
+      fold.title = folded ? 'Show the lines below' : 'Hide the lines below';
+      fold.addEventListener('click', e => { e.stopPropagation(); toggleCollapsed(start.p); });
+      row.appendChild(fold);
+    }
     const out = [row];
     if (shown) out.push(commentEl(shown.comments));
-    if (cur.children.length > 1) out.push(branchList(cur.children, data, active));
+    if (hasChoices && !folded) out.push(branchList(cur.children, data, active));
     return out;
+  }
+
+  function countLines(node) {
+    return node.children.length ? node.children.reduce((s, c) => s + countLines(c), 0) : 1;
   }
 
   function branchList(children, data, active) {
@@ -567,12 +614,15 @@
     p.queue.forEach((leaf, i) => {
       const r = p.results.get(leaf);
       const seg = el('span', 'ldt-seg' + (r ? ' ' + r : i === p.idx && !p.roundDone ? ' cur' : ''));
-      seg.title = 'Line ' + (i + 1) + ': ' + lineText(leaf);
+      // details only for finished lines, so hovering doesn't give answers away
+      const nm = r ? lineName(leaf) : '';
+      seg.title = 'Line ' + (i + 1) + (nm ? ' · ' + nm : '') + (r ? ': ' + lineText(leaf) : '');
       seg.addEventListener('click', () => startLine(i));
       prog.appendChild(seg);
     });
     box.appendChild(prog);
-    let label = `Line ${p.idx + 1} of ${p.queue.length} · ${ORDERS[p.order]}`;
+    const name = lineName(p.target, p.cur);
+    let label = `Line ${p.idx + 1} of ${p.queue.length}${name ? ' · ' + name : ''} · ${ORDERS[p.order]}`;
     if (p.order === 'sr') {
       const rec = srLoad();
       const now = Date.now();
@@ -625,6 +675,17 @@
       t.classList.add('ldt-ptree');
       box.appendChild(t);
     }
+  }
+
+  // the most specific name along the line (e.g. "Scotch game" → "Scotch, 4...Qh4 line")
+  function lineName(leaf, upTo) {
+    let name = '';
+    const end = upTo === undefined ? leaf.length : Math.min(leaf.length, upTo.length);
+    for (let k = 2; k <= end; k += 2) {
+      const n = practice.snap.nodes.get(leaf.slice(0, k));
+      if (n && n.label) name = n.label;
+    }
+    return name;
   }
 
   function lineText(leaf) {
