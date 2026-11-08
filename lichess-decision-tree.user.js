@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.4.0
+// @version      2.5.0
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -33,7 +33,7 @@
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.4.0';
+  const VERSION = '2.5.0';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -48,6 +48,13 @@
   const style = document.createElement('style');
   style.textContent = `
     .analyse__moves.ldt-on .tview2 { display: none !important; }
+    body.ldt-practicing .analyse__fork { display: none !important; }
+    .ldt-forktag {
+      pointer-events: none; display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 9px;
+      font-size: 11px; font-weight: 600; line-height: 1.6; align-self: center;
+      background: rgba(128, 128, 128, 0.22); color: var(--c-font, #bababa);
+    }
+    .ldt-forktag.ldt-colored { background: color-mix(in srgb, var(--ldt-lv) 20%, transparent); color: var(--ldt-lv); }
     .ldt-box { font-size: 14px; }
     .ldt-bar {
       position: sticky; top: 0; z-index: 2;
@@ -185,6 +192,8 @@
     if (!practice) restoreRecIfPending();
 
     const data = parseMoveList(tview);
+    if (document.body.classList.contains('ldt-practicing') !== !!practice) document.body.classList.toggle('ldt-practicing', !!practice);
+    if (!practice) decorateFork(data);
     if (practice) practiceTick(data);
 
     const signature = (practice ? 'P' + practice.version : treeOn ? '1' : '0') + data.signature;
@@ -415,6 +424,42 @@
     if (r.top < view.top + 30 || r.bottom > view.bottom - 10) {
       host.scrollTop += r.top - view.top - (view.height - r.height) / 2;
     }
+  }
+
+  // ---------- names on Lichess's variation buttons (under the move list) ----------
+  function rowName(node) {
+    for (let n = node; ; n = n.children[0]) {
+      if (n.label) return n.label;
+      if (n.children.length !== 1) return '';
+    }
+  }
+  // tree level of the row that starts with `node` (same numbering as the tree view)
+  function rowLevel(node, data) {
+    let lv = 0;
+    for (let a = node.parent; a && a !== data.root; a = a.parent) if (a.children.length > 1) lv++;
+    return lv;
+  }
+  function decorateFork(data) {
+    const fork = document.querySelector('.analyse__fork');
+    if (!fork) return;
+    const here = data.active ? data.nodes.get(data.active) : data.root;
+    if (!here) return;
+    fork.querySelectorAll(':scope > move[data-it]').forEach(mv => {
+      const child = here.children[parseInt(mv.getAttribute('data-it'), 10)];
+      const name = child ? rowName(child) : '';
+      let tag = mv.querySelector(':scope > .ldt-forktag');
+      if (!name) { if (tag) tag.remove(); return; }
+      if (!tag) {
+        tag = el('span', 'ldt-forktag');
+        const san = mv.querySelector(':scope > san');
+        if (san) san.after(tag); else mv.appendChild(tag); // keeps the eval at the right edge
+      }
+      if (tag.textContent !== name) tag.textContent = name;
+      const color = levelColor(rowLevel(child, data));
+      const want = color ? 'ldt-forktag ldt-colored' : 'ldt-forktag';
+      if (tag.className !== want) tag.className = want;
+      if (color && tag.style.getPropertyValue('--ldt-lv') !== color) tag.style.setProperty('--ldt-lv', color);
+    });
   }
 
   // =====================================================================

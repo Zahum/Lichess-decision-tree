@@ -17,6 +17,7 @@ Lichess's own move list stays in the page (hidden), so the explorer, engine, edi
 
 - **Name a line** by starting a move's comment with the name in square brackets, e.g. `[Scotch game] White pushes straight for the center`. The name shows as a label at the end of that row, and the brackets disappear from the comment. Because the name lives in the study, it shows on every computer, in shared studies and in PGN exports.
 - **Collapse a line:** hover over a row and click **▾** to hide the choices below it; **▸ 2 lines** shows what is hidden. **Collapse all / Expand all** at the top fold or unfold the whole tree. The setting is remembered per chapter, and a collapsed line opens by itself while you are on one of its moves.
+- **Names on Lichess's variation buttons:** the buttons under the move list that let you pick the next variation also show the line's name (e.g. `2...Nc6 Scotch game`).
 - **Colours per level:** from the second row down, each level of the tree has its own colour (line names and the move number that starts each row), so unnamed lines are easy to place too. The top row stays neutral.
 - In practice mode, a line's name appears once the named move has been played (so it never gives the answer away).
 
@@ -42,7 +43,7 @@ Click **▶ Practice** to drill the lines of the chapter.
 
 **Your study stays untouched:** practice switches the study's **REC** button off (moves are then kept on your screen only, never saved to the study) and back on when you exit. If you made wrong moves, *Exit* reloads the page to clear them.
 
-Tip: close the opening explorer and the engine while practising, they would give the answers away.
+While practising, Lichess's variation buttons under the move list are hidden, since they would show the possible moves. Tip: close the opening explorer and the engine while practising, they would give the answers away.
 
 ## Install
 
