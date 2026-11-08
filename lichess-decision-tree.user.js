@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      1.0.0
-// @description  Shows the move list of Lichess analysis and studies as a decision tree: every option at a branch point on the same level, leader lines, one comment per row (switches to the active move's comment). A button switches back to Lichess's normal list.
+// @version      2.0.0
+// @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
 // @supportURL   https://github.com/Zahum/lichess-decision-tree/issues
@@ -17,8 +17,26 @@
 (function () {
   'use strict';
 
-  const STORE_KEY = 'ldt-tree-on';
-  let treeOn = readSetting();
+  // ---------- settings ----------
+  const store = {
+    get: (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } },
+    del: k => { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } },
+  };
+  const KEYS = {
+    treeOn: 'ldt-tree-on',
+    order: 'ldt-order',
+    comments: 'ldt-comments',
+    recRestore: 'ldt-rec-restore',
+    sr: 'ldt-sr:',
+  };
+  const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
+  const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
+  const OPPONENT_DELAY = 450;
+  const NEXT_LINE_DELAY = 1500;
+
+  let treeOn = store.get(KEYS.treeOn, '1') !== '0';
+  let practice = null; // practice session state, null when not practising
   let lastSignature = '';
   let lastActive = null;
   let scheduled = false;
@@ -30,18 +48,22 @@
     .ldt-box { font-size: 14px; }
     .ldt-bar {
       position: sticky; top: 0; z-index: 2;
-      display: flex; justify-content: space-between; align-items: center;
+      display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; align-items: center;
       padding: 4px 8px; font-size: 11px;
       color: var(--c-font-dim, #8a8a8a);
       background: var(--c-bg-box, #262421);
       border-bottom: 1px solid rgba(128, 128, 128, 0.25);
     }
-    .ldt-bar button {
+    .ldt-bar b { color: var(--c-font-clear, #ddd); font-size: 12px; }
+    .ldt-bar .ldt-grp { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .ldt-box button, .ldt-box select {
       font-size: 11px; padding: 2px 8px; border-radius: 4px; cursor: pointer;
       border: 1px solid rgba(128, 128, 128, 0.45); background: transparent;
       color: var(--c-font, #bababa);
     }
-    .ldt-bar button:hover { background: rgba(128, 128, 128, 0.18); }
+    .ldt-box select { padding: 1px 4px; background: var(--c-bg-box, #262421); }
+    .ldt-box button:hover { background: rgba(128, 128, 128, 0.18); }
+    .ldt-box label { display: inline-flex; gap: 3px; align-items: center; cursor: pointer; }
     .ldt-tree { padding: 8px 10px 14px; line-height: 1.55; }
     .ldt-tree ul { list-style: none; margin: 0; padding: 0 0 0 10px; }
     .ldt-tree li { position: relative; padding-left: 16px; }
@@ -76,13 +98,37 @@
       font-size: 12.5px; line-height: 1.35; padding: 1px 5px 3px;
       color: var(--c-font-dim, #9a9a9a); overflow-wrap: break-word;
     }
+
+    /* practice */
+    .ldt-prog { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 10px 2px; }
+    .ldt-seg { width: 14px; height: 6px; border-radius: 3px; background: rgba(128, 128, 128, 0.3); cursor: pointer; }
+    .ldt-seg.ok { background: #629924; }
+    .ldt-seg.bad { background: #cc3333; }
+    .ldt-seg.cur { background: var(--c-primary, #3692e7); }
+    .ldt-lbl { padding: 2px 10px 4px; font-size: 11px; color: var(--c-font-dim, #8a8a8a); }
+    .ldt-line { padding: 6px 12px 2px; line-height: 1.9; }
+    .ldt-q {
+      display: inline-block; padding: 0 7px; border-radius: 4px; font-weight: 700;
+      border: 1px dashed var(--c-primary, #3692e7); color: var(--c-primary, #3692e7);
+    }
+    .ldt-pcm { padding: 0 17px 6px; }
+    .ldt-fb { margin: 4px 12px 10px; padding: 7px 10px; border-radius: 5px; font-size: 13px; line-height: 1.35; }
+    .ldt-fb.info { background: rgba(54, 146, 231, 0.12); color: #8fc3f5; border-left: 3px solid #3692e7; }
+    .ldt-fb.good { background: rgba(98, 153, 36, 0.18); color: #9fd36a; border-left: 3px solid #629924; }
+    .ldt-fb.bad { background: rgba(204, 51, 51, 0.15); color: #f08a8a; border-left: 3px solid #cc3333; }
+    .ldt-fb.warn { background: rgba(230, 157, 0, 0.14); color: #f0c060; border-left: 3px solid #e69d00; }
+    .ldt-fb button { margin-left: 6px; }
+    .ldt-btns { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px 10px; border-top: 1px solid rgba(128, 128, 128, 0.25); }
+    .ldt-btns button { flex: 1 1 22%; font-size: 12px; padding: 5px 4px; }
+    .ldt-ptree { border-top: 1px solid rgba(128, 128, 128, 0.25); }
   `;
   document.head.appendChild(style);
 
   const GLYPH_CLASS = { '!': 'good', '!!': 'brilliant', '!?': 'interesting', '?!': 'inaccuracy', '?': 'mistake', '??': 'blunder' };
 
   // ---------- watch the page ----------
-  function schedule() {
+  function schedule(force) {
+    if (force) lastSignature = '';
     if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(() => {
@@ -90,7 +136,7 @@
       try { update(); } catch (e) { console.warn('[decision tree]', e); }
     });
   }
-  new MutationObserver(schedule).observe(document.body, {
+  new MutationObserver(() => schedule()).observe(document.body, {
     childList: true, subtree: true, characterData: true,
     attributes: true, attributeFilter: ['class', 'p'],
   });
@@ -108,21 +154,27 @@
       lastSignature = '';
     }
     if (host.firstElementChild !== box) host.insertBefore(box, host.firstElementChild);
-    if (host.classList.contains('ldt-on') !== treeOn) host.classList.toggle('ldt-on', treeOn);
+    const hide = treeOn || !!practice;
+    if (host.classList.contains('ldt-on') !== hide) host.classList.toggle('ldt-on', hide);
+
+    if (!practice) restoreRecIfPending();
 
     const data = parseMoveList(tview);
-    const signature = (treeOn ? '1' : '0') + data.signature;
+    if (practice) practiceTick(data);
+
+    const signature = (practice ? 'P' + practice.version : treeOn ? '1' : '0') + data.signature;
     if (signature === lastSignature) return;
     lastSignature = signature;
 
-    render(box, data);
-    if (treeOn && data.active !== lastActive) scrollToActive(box, host);
+    if (practice) renderPractice(box, data);
+    else render(box, data);
+    if (!practice && treeOn && data.active !== lastActive) scrollToActive(box, host);
     lastActive = data.active;
   }
 
   // ---------- read Lichess's move list ----------
   function parseMoveList(tview) {
-    const root = { p: '', children: [], comments: [], depth: 0 };
+    const root = { p: '', san: '', glyphs: [], children: [], comments: [], depth: 0 };
     const nodes = new Map();
     const order = [];
     let active = null;
@@ -157,12 +209,11 @@
         last = node;
       } else {
         const parts = [...el.querySelectorAll(':scope > span:not(.by)')].map(s => s.textContent.trim());
-        const text = (parts.join(' ').trim() || el.textContent.trim());
+        const text = parts.join(' ').trim() || el.textContent.trim();
         if (text) last.comments.push(text);
       }
     }
 
-    // parent/child links from the position paths (each move adds 2 characters)
     for (const node of order) {
       let parentPath = node.p.slice(0, -2);
       let parent = parentPath === '' ? root : nodes.get(parentPath);
@@ -170,10 +221,10 @@
         parentPath = parentPath.slice(0, -2);
         parent = parentPath === '' ? root : nodes.get(parentPath);
       }
-      (parent || root).children.push(node);
+      node.parent = parent || root;
+      node.parent.children.push(node);
     }
 
-    // move numbers when no move carried a numbered index (two-column main line only)
     if (rootPly === null) {
       const firstIndex = tview.querySelector(':scope > index');
       const n = firstIndex ? parseInt(firstIndex.textContent, 10) : NaN;
@@ -188,40 +239,37 @@
       .map(n => n.p + '\u0001' + n.san + '\u0001' + n.glyphs.join('') + '\u0001' + n.comments.join('\u0002'))
       .join('\u0003') + '\u0004' + active + '\u0004' + root.comments.join('\u0002') + '\u0004' + rootPly;
 
-    return { root, active, rootPly, signature };
+    return { root, nodes, active, rootPly, signature };
   }
 
-  // ---------- draw the tree ----------
+  // ---------- tree view ----------
   function render(box, data) {
     box.textContent = '';
-    const bar = document.createElement('div');
-    bar.className = 'ldt-bar';
-    const label = document.createElement('span');
-    label.textContent = treeOn ? 'Decision tree' : '';
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = treeOn ? 'Show Lichess list' : 'Show decision tree';
-    btn.addEventListener('click', () => {
+    const bar = el('div', 'ldt-bar');
+    bar.appendChild(el('span', '', treeOn ? 'Decision tree' : ''));
+    const grp = el('span', 'ldt-grp');
+    if (data.root.children.length) grp.appendChild(button('▶ Practice', () => startPractice(data)));
+    grp.appendChild(button(treeOn ? 'Show Lichess list' : 'Show decision tree', () => {
       treeOn = !treeOn;
-      writeSetting(treeOn);
-      lastSignature = '';
-      schedule();
-    });
-    bar.append(label, btn);
+      store.set(KEYS.treeOn, treeOn ? '1' : '0');
+      schedule(true);
+    }));
+    bar.appendChild(grp);
     box.appendChild(bar);
-    if (!treeOn) return;
+    if (treeOn) box.appendChild(treeEl(data, data.active));
+  }
 
-    const tree = document.createElement('div');
-    tree.className = 'ldt-tree';
+  function treeEl(data, active) {
+    const tree = el('div', 'ldt-tree');
     if (data.root.comments.length) tree.appendChild(commentEl(data.root.comments));
     const first = data.root.children;
-    if (first.length === 1) tree.append(...segment(first[0], data));
-    else if (first.length > 1) tree.appendChild(branchList(first, data));
-    box.appendChild(tree);
+    if (first.length === 1) tree.append(...segment(first[0], data, active));
+    else if (first.length > 1) tree.appendChild(branchList(first, data, active));
+    return tree;
   }
 
   // one row = a run of moves until the next choice; then the choices as a list
-  function segment(start, data) {
+  function segment(start, data, active) {
     const moves = [];
     let cur = start;
     for (;;) {
@@ -229,66 +277,46 @@
       if (cur.children.length === 1) cur = cur.children[0];
       else break;
     }
-
     const withComments = moves.filter(m => m.comments.length);
-    const activeWithComment = withComments.find(m => m.p === data.active);
-    const shown = activeWithComment || withComments[0] || null;
+    const shown = withComments.find(m => m.p === active) || withComments[0] || null;
 
-    const row = document.createElement('div');
-    row.className = 'ldt-row';
-    moves.forEach((m, i) => row.appendChild(moveEl(m, i === 0, data, shown)));
+    const row = el('div', 'ldt-row');
+    moves.forEach((m, i) => row.appendChild(moveEl(m, i === 0, data.rootPly, active, shown)));
     const out = [row];
     if (shown) out.push(commentEl(shown.comments));
-    if (cur.children.length > 1) out.push(branchList(cur.children, data));
+    if (cur.children.length > 1) out.push(branchList(cur.children, data, active));
     return out;
   }
 
-  function branchList(children, data) {
-    const ul = document.createElement('ul');
+  function branchList(children, data, active) {
+    const ul = el('ul');
     for (const child of children) {
-      const li = document.createElement('li');
-      li.append(...segment(child, data));
+      const li = el('li');
+      li.append(...segment(child, data, active));
       ul.appendChild(li);
     }
     return ul;
   }
 
-  function moveEl(m, firstInRow, data, shown) {
-    const ply = data.rootPly + m.depth;
+  function moveEl(m, firstInRow, rootPly, active, shown) {
+    const ply = rootPly + m.depth;
     const white = ply % 2 === 1;
     const num = Math.ceil(ply / 2);
-    const el = document.createElement('span');
-    el.className = 'ldt-mv' + (m.p === data.active ? ' active' : '');
-    el.setAttribute('p', m.p); // lets Lichess handle clicks and right-clicks natively
+    const node = el('span', 'ldt-mv' + (m.p === active ? ' active' : ''));
+    node.setAttribute('p', m.p); // lets Lichess handle clicks and right-clicks natively
     const indexText = white ? num + '.' : firstInRow ? num + '...' : '';
-    if (indexText) {
-      const ix = document.createElement('span');
-      ix.className = 'ldt-ix';
-      ix.textContent = indexText;
-      el.appendChild(ix);
+    if (indexText) node.appendChild(el('span', 'ldt-ix', indexText));
+    node.appendChild(document.createTextNode(m.san));
+    for (const g of m.glyphs) node.appendChild(el('span', 'ldt-gl ' + (GLYPH_CLASS[g] || ''), g));
+    if (shown !== undefined && m.comments.length && m !== shown) {
+      node.appendChild(el('span', 'ldt-more', '💬'));
+      node.title = m.comments.join('\n');
     }
-    el.appendChild(document.createTextNode(m.san));
-    for (const g of m.glyphs) {
-      const gl = document.createElement('span');
-      gl.className = 'ldt-gl ' + (GLYPH_CLASS[g] || '');
-      gl.textContent = g;
-      el.appendChild(gl);
-    }
-    if (m.comments.length && m !== shown) {
-      const more = document.createElement('span');
-      more.className = 'ldt-more';
-      more.textContent = '💬';
-      el.appendChild(more);
-      el.title = m.comments.join('\n');
-    }
-    return el;
+    return node;
   }
 
-  function commentEl(comments) {
-    const el = document.createElement('div');
-    el.className = 'ldt-cm';
-    el.textContent = comments.join(' · ');
-    return el;
+  function commentEl(comments, extraClass) {
+    return el('div', 'ldt-cm' + (extraClass ? ' ' + extraClass : ''), comments.join(' · '));
   }
 
   function scrollToActive(box, host) {
@@ -301,10 +329,375 @@
     }
   }
 
-  function readSetting() {
-    try { return localStorage.getItem(STORE_KEY) !== '0'; } catch (e) { return true; }
+  // =====================================================================
+  // PRACTICE MODE
+  // =====================================================================
+  function startPractice(data) {
+    const wrap = document.querySelector('.main-board .cg-wrap') || document.querySelector('.cg-wrap');
+    const side = wrap && wrap.classList.contains('orientation-black') ? 'black' : 'white';
+    const leaves = [];
+    (function collect(n) {
+      if (!n.children.length) { if (n !== data.root) leaves.push(n.p); return; }
+      n.children.forEach(collect);
+    })(data.root);
+    if (!leaves.length) return;
+
+    practice = {
+      snap: data, side, leaves,
+      order: ORDERS[store.get(KEYS.order, 'tree')] ? store.get(KEYS.order, 'tree') : 'tree',
+      comments: store.get(KEYS.comments, '1') !== '0',
+      queue: [], idx: 0, results: new Map(),
+      target: null, cur: '', mistakes: 0, revealed: false,
+      expecting: null, feedback: null, browsing: false, showTree: false,
+      roundDone: false, junk: false, recRestore: false, timer: 0, version: 0, keepFeedback: false,
+    };
+    switchRecOff();
+    buildQueue();
+    startLine(0);
   }
-  function writeSetting(on) {
-    try { localStorage.setItem(STORE_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+
+  function exitPractice() {
+    const p = practice;
+    if (!p) return;
+    clearTimeout(p.timer);
+    practice = null;
+    const reload = p.junk;
+    if (p.recRestore) {
+      const rec = recButton();
+      if (rec && !rec.classList.contains('on')) rec.click();
+      store.del(KEYS.recRestore);
+    }
+    if (reload) location.reload(); // clears the wrong practice moves from the page
+    else schedule(true);
+  }
+
+  function bump() { if (practice) { practice.version++; schedule(true); } }
+
+  function buildQueue() {
+    const p = practice;
+    let q = p.leaves.slice();
+    if (p.order === 'shuffle') {
+      for (let i = q.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [q[i], q[j]] = [q[j], q[i]];
+      }
+    } else if (p.order === 'sr') {
+      const rec = srLoad();
+      const pos = new Map(q.map((l, i) => [l, i]));
+      q.sort((a, b) => ((rec[a] && rec[a].due) || 0) - ((rec[b] && rec[b].due) || 0) || pos.get(a) - pos.get(b));
+    }
+    p.queue = q;
+    p.results = new Map();
+    p.roundDone = false;
+  }
+
+  function startLine(i) {
+    const p = practice;
+    clearTimeout(p.timer);
+    p.idx = Math.max(0, Math.min(i, p.queue.length - 1));
+    p.target = p.queue[p.idx];
+    p.mistakes = 0;
+    p.revealed = false;
+    p.feedback = null;
+    p.keepFeedback = false;
+    p.browsing = false;
+    p.roundDone = false;
+    p.cur = '';
+    jumpTo('');
+    bump();
+  }
+
+  function nextPending(from) {
+    const p = practice;
+    for (let k = 1; k <= p.queue.length; k++) {
+      const i = (from + k) % p.queue.length;
+      if (!p.results.has(p.queue[i])) return i;
+    }
+    return -1;
+  }
+
+  const nodeOf = path => (path === '' ? practice.snap.root : practice.snap.nodes.get(path));
+  const plyOf = path => practice.snap.rootPly + path.length / 2;
+  const userToMove = path => {
+    const whiteToMove = plyOf(path) % 2 === 0;
+    return (practice.side === 'white') === whiteToMove;
+  };
+
+  // reacts to what happened on the board
+  function practiceTick(data) {
+    const p = practice;
+    const active = data.active || '';
+    if (p.expecting !== null) {
+      if (active !== p.expecting) return; // still waiting for Lichess to get there
+      p.expecting = null;
+      p.cur = active;
+      p.browsing = false;
+      arrive();
+      return;
+    }
+    if (active === p.cur) {
+      if (p.browsing) { p.browsing = false; bump(); }
+      return;
+    }
+    const isChild = active.length === p.cur.length + 2 && active.startsWith(p.cur);
+    if (isChild && !p.browsing && !p.roundDone && nodeOf(p.cur).children.length) {
+      if (p.snap.nodes.has(active)) {
+        // a move from the repertoire: follow it (and switch lines if it is another branch)
+        p.cur = active;
+        if (!p.target.startsWith(active)) retarget(active);
+        if (!userToMove(p.cur.slice(0, -2))) p.feedback = null;
+        else p.feedback = { type: 'good', text: '✓ Correct' };
+        arrive();
+      } else {
+        // not in the repertoire: count it, take it back
+        const wrong = data.nodes.get(active);
+        p.mistakes++;
+        p.junk = true;
+        p.keepFeedback = true;
+        p.feedback = {
+          type: 'bad',
+          text: '✗ ' + (wrong ? moveText(wrong.san, plyOf(active)) + ' isn\'t' : 'That move isn\'t') +
+            ' in your repertoire. The move was taken back, try again.',
+        };
+        jumpTo(p.cur);
+        bump();
+      }
+      return;
+    }
+    if (!p.browsing) { p.browsing = true; bump(); }
+  }
+
+  // the board reached p.cur: decide what comes next
+  function arrive() {
+    const p = practice;
+    const node = nodeOf(p.cur);
+    if (!node || !node.children.length) {
+      const ok = p.mistakes === 0 && !p.revealed;
+      p.results.set(p.target, ok ? 'ok' : 'bad');
+      srRecord(p.target, ok);
+      const next = nextPending(p.idx);
+      if (next === -1) {
+        p.roundDone = true;
+        const good = [...p.results.values()].filter(v => v === 'ok').length;
+        p.feedback = { type: 'good', text: `🏁 Round complete: ${good} of ${p.queue.length} lines on the first try.` };
+      } else {
+        p.feedback = ok
+          ? { type: 'good', text: '✓ Line complete, first try. Next line in a moment…' }
+          : { type: 'warn', text: `Line complete with ${p.mistakes || 'a revealed'} ${p.mistakes > 1 ? 'mistakes' : p.mistakes ? 'mistake' : 'answer'}. Next line in a moment…` };
+        p.timer = setTimeout(() => { if (practice === p) startLine(next); }, NEXT_LINE_DELAY);
+      }
+      bump();
+      return;
+    }
+    if (!userToMove(p.cur)) {
+      let child = node.children.find(c => p.target.startsWith(c.p));
+      if (!child) { retarget(node.children[0].p); child = node.children.find(c => p.target.startsWith(c.p)); }
+      p.timer = setTimeout(() => { if (practice === p && p.cur === node.p) jumpTo(child.p); }, OPPONENT_DELAY);
+    } else if (p.keepFeedback) {
+      p.keepFeedback = false; // keep the "wrong move" / "answer" message until the next move
+    } else {
+      const praise = p.feedback && p.feedback.type === 'good' ? '✓ Correct. ' : '';
+      p.feedback = { type: 'info', text: praise + 'Your move: play it on the board.' };
+    }
+    bump();
+  }
+
+  // pick another line that runs through `path` (first one not done yet in this round)
+  function retarget(path) {
+    const p = practice;
+    const under = p.queue.filter(l => l === path || l.startsWith(path));
+    const pick = under.find(l => !p.results.has(l)) || under[0];
+    if (pick) { p.target = pick; p.idx = p.queue.indexOf(pick); }
+  }
+
+  function showAnswer() {
+    const p = practice;
+    const node = nodeOf(p.cur);
+    if (!node || !node.children.length || !userToMove(p.cur)) return;
+    p.revealed = true;
+    const ply = plyOf(p.cur) + 1;
+    p.feedback = {
+      type: 'warn',
+      text: '👁 Answer: ' + node.children.map(c => moveText(c.san, ply)).join(' or '),
+    };
+    bump();
+  }
+
+  // ---------- practice panel ----------
+  function renderPractice(box, data) {
+    const p = practice;
+    box.textContent = '';
+
+    const bar = el('div', 'ldt-bar');
+    bar.appendChild(el('b', '', 'Practice · ' + (p.side === 'white' ? 'White' : 'Black')));
+    const grp = el('span', 'ldt-grp');
+    const sel = el('select');
+    for (const [k, v] of Object.entries(ORDERS)) {
+      const o = el('option', '', v);
+      o.value = k;
+      if (k === p.order) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener('change', () => {
+      p.order = sel.value;
+      store.set(KEYS.order, sel.value);
+      buildQueue();
+      startLine(0);
+    });
+    grp.appendChild(sel);
+    const lab = el('label');
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.checked = p.comments;
+    cb.addEventListener('change', () => { p.comments = cb.checked; store.set(KEYS.comments, cb.checked ? '1' : '0'); bump(); });
+    lab.append(cb, document.createTextNode('Comments'));
+    grp.appendChild(lab);
+    grp.appendChild(button(p.junk ? 'Exit (reloads page)' : 'Exit practice', exitPractice));
+    bar.appendChild(grp);
+    box.appendChild(bar);
+
+    // progress
+    const prog = el('div', 'ldt-prog');
+    p.queue.forEach((leaf, i) => {
+      const r = p.results.get(leaf);
+      const seg = el('span', 'ldt-seg' + (r ? ' ' + r : i === p.idx && !p.roundDone ? ' cur' : ''));
+      seg.title = 'Line ' + (i + 1) + ': ' + lineText(leaf);
+      seg.addEventListener('click', () => startLine(i));
+      prog.appendChild(seg);
+    });
+    box.appendChild(prog);
+    let label = `Line ${p.idx + 1} of ${p.queue.length} · ${ORDERS[p.order]}`;
+    if (p.order === 'sr') {
+      const rec = srLoad();
+      const now = Date.now();
+      label += ` · due now: ${p.leaves.filter(l => !rec[l] || rec[l].due <= now).length}`;
+    }
+    box.appendChild(el('div', 'ldt-lbl', label));
+
+    // the line played so far
+    const line = el('div', 'ldt-line');
+    const path = [];
+    for (let k = 2; k <= p.cur.length; k += 2) path.push(p.snap.nodes.get(p.cur.slice(0, k)));
+    path.filter(Boolean).forEach((m, i) => line.appendChild(moveEl(m, i === 0, p.snap.rootPly, null, undefined)));
+    const node = nodeOf(p.cur);
+    if (node && node.children.length && userToMove(p.cur) && !p.roundDone) {
+      const ply = plyOf(p.cur) + 1;
+      const num = Math.ceil(ply / 2);
+      line.appendChild(el('span', 'ldt-q', (ply % 2 === 1 ? num + '.' : num + '...') + ' ?'));
+    }
+    if (!path.length && !(node && node.children.length && userToMove(p.cur))) {
+      line.appendChild(el('span', 'ldt-lbl', 'Starting position'));
+    }
+    box.appendChild(line);
+    if (p.comments && node && node.comments.length) box.appendChild(commentEl(node.comments, 'ldt-pcm'));
+
+    // feedback
+    if (p.browsing) {
+      const fb = el('div', 'ldt-fb warn', 'You\'re looking at another position.');
+      fb.appendChild(button('Continue practice', () => { p.browsing = false; jumpTo(p.cur); bump(); }));
+      box.appendChild(fb);
+    } else if (p.feedback) {
+      box.appendChild(el('div', 'ldt-fb ' + p.feedback.type, p.feedback.text));
+    }
+
+    // buttons
+    const btns = el('div', 'ldt-btns');
+    btns.appendChild(button('◀ Previous line', () => startLine(p.idx - 1)));
+    if (node && !node.children.length) btns.appendChild(button('↺ Repeat line', () => startLine(p.idx)));
+    else btns.appendChild(button('👁 Show answer', showAnswer));
+    btns.appendChild(button(p.showTree ? '🌳 Hide tree' : '🌳 Show tree', () => { p.showTree = !p.showTree; bump(); }));
+    if (p.roundDone) btns.appendChild(button('↻ New round', () => { buildQueue(); startLine(0); }));
+    else btns.appendChild(button('Next line ▶', () => startLine(p.idx + 1 >= p.queue.length ? 0 : p.idx + 1)));
+    box.appendChild(btns);
+
+    if (p.showTree) {
+      const t = treeEl(p.snap, data.active);
+      t.classList.add('ldt-ptree');
+      box.appendChild(t);
+    }
+  }
+
+  function lineText(leaf) {
+    const parts = [];
+    for (let k = 2; k <= leaf.length; k += 2) {
+      const n = practice.snap.nodes.get(leaf.slice(0, k));
+      if (n) parts.push(moveText(n.san, plyOf(n.p)));
+    }
+    return parts.slice(-4).join(' ');
+  }
+
+  function moveText(san, ply) {
+    const num = Math.ceil(ply / 2);
+    return (ply % 2 === 1 ? num + '.' : num + '...') + san;
+  }
+
+  // ---------- driving Lichess ----------
+  function jumpTo(path) {
+    if (!practice) return;
+    practice.expecting = path;
+    if (path === '') {
+      // the Home key takes Lichess back to the starting position
+      for (const type of ['keydown', 'keyup']) {
+        document.dispatchEvent(new KeyboardEvent(type, { key: 'Home', code: 'Home', bubbles: true }));
+      }
+      return;
+    }
+    const target = [...document.querySelectorAll('.analyse__moves .tview2 move[p]')]
+      .find(m => m.getAttribute('p') === path);
+    if (!target) { practice.expecting = null; return; }
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }));
+  }
+
+  function recButton() {
+    return document.querySelector('.study__buttons a.mode.write') || document.querySelector('a.mode.write');
+  }
+  function studyKey() {
+    const m = location.pathname.match(/^\/study\/([^/]+)/);
+    return m ? m[1] : '';
+  }
+  function switchRecOff() {
+    const rec = recButton();
+    if (rec && rec.classList.contains('on')) {
+      rec.click();
+      practice.recRestore = true;
+      store.set(KEYS.recRestore, studyKey());
+    }
+  }
+  // if the page was reloaded during practice, switch REC back on
+  function restoreRecIfPending() {
+    const pending = store.get(KEYS.recRestore, '');
+    if (!pending || pending !== studyKey()) return;
+    const rec = recButton();
+    if (!rec) return;
+    if (!rec.classList.contains('on')) rec.click();
+    store.del(KEYS.recRestore);
+  }
+
+  // ---------- spaced repetition ----------
+  function srKey() { return KEYS.sr + location.pathname; }
+  function srLoad() {
+    try { return JSON.parse(store.get(srKey(), '{}')) || {}; } catch (e) { return {}; }
+  }
+  function srRecord(leaf, ok) {
+    const rec = srLoad();
+    const r = rec[leaf] || { box: 0, due: 0 };
+    r.box = ok ? Math.min(r.box + 1, SR_INTERVALS_MIN.length - 1) : 0;
+    r.due = Date.now() + SR_INTERVALS_MIN[r.box] * 60000;
+    rec[leaf] = r;
+    store.set(srKey(), JSON.stringify(rec));
+  }
+
+  // ---------- helpers ----------
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function button(text, onClick) {
+    const b = el('button', '', text);
+    b.type = 'button';
+    b.addEventListener('click', onClick);
+    return b;
   }
 })();

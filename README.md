@@ -1,6 +1,6 @@
 # Lichess decision tree
 
-A userscript that shows the move list of **Lichess analysis boards and studies as a decision tree**, built for studying openings with many variations in one chapter.
+A userscript that shows the move list of **Lichess analysis boards and studies as a decision tree** and adds a **practice mode** that drills every line of a chapter. Built for studying openings with many variations in one chapter.
 
 ![Decision tree in a Lichess study](images/decision-tree.png)
 
@@ -14,6 +14,26 @@ A userscript that shows the move list of **Lichess analysis boards and studies a
 - **"Show Lichess list" button** switches back to Lichess's own move list at any time (the choice is remembered).
 
 Lichess's own move list stays in the page (hidden), so the explorer, engine, editing and extensions such as LiChess Tools keep working.
+
+## Practice mode
+
+Click **▶ Practice** to drill every line of the chapter, all variations in one chapter.
+
+![Practice mode](images/practice.png)
+
+- You practise the side the board is turned to (flip the board to practise Black).
+- The tree is hidden. You see only the **line played so far**, with `3. ?` where your move is due.
+- The script plays the opponent's moves and **rotates through all his responses**, so every line (from the start to the end of a variation) comes up.
+- You play your moves on the board. A wrong move is **taken back** and counted; **Show answer** reveals the move.
+- If you have more than one move in a position (e.g. `3.d3` and `3.d4`), **either is accepted** and the drill continues down that branch.
+- **Progress bar:** one segment per line (green = first try, red = mistakes). Click a segment to jump to that line.
+- **◀ Previous line / Next line ▶ / ↺ Repeat line**, **🌳 Show tree** at any time, and click a move of the played line to look at that position.
+- **Line order:** *Tree order*, *Shuffled* or *Spaced repetition* (lines you got wrong come back sooner; remembered per chapter in your browser).
+- **Comments** toggle: show each move's comment once it's played, or practise from memory only.
+
+**Your study stays untouched:** practice switches the study's **REC** button off (moves are then kept on your screen only, never saved to the study) and back on when you exit. If you made wrong moves, *Exit* reloads the page to clear them.
+
+Tip: close the opening explorer and the engine while practising, they would give the answers away.
 
 ## Install
 
