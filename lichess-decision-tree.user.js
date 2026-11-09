@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.9.0
+// @version      2.10.0
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -30,11 +30,12 @@
     recRestore: 'ldt-rec-restore',
     collapsed: 'ldt-collapsed:',
     skipped: 'ldt-skipped:',
+    srlog: 'ldt-srlog:',
     sr: 'ldt-sr:',
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.9.0';
+  const VERSION = '2.10.0';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -43,6 +44,7 @@
   let practice = null; // practice session state, null when not practising
   let lastSignature = '';
   let lastData = null;
+  let statsOn = false;
   let lastActive = null;
   let scheduled = false;
 
@@ -172,6 +174,35 @@
     }
     .ldt-fold:hover { background: rgba(128, 128, 128, 0.18); }
     .ldt-fold.open { opacity: 0.25; transition: opacity 0.15s; }
+    .ldt-stats { padding: 8px 10px 14px; font-size: 12.5px; }
+    .ldt-st-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .ldt-st-tile { background: rgba(128, 128, 128, 0.12); border-radius: 6px; padding: 7px 8px; }
+    .ldt-st-big { font-size: 18px; font-weight: 700; color: var(--c-font-clear, #ddd); }
+    .ldt-st-small { font-size: 11px; color: var(--c-font-dim, #8a8a8a); }
+    .ldt-st-h { margin: 12px 0 5px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--c-font-dim, #8a8a8a); }
+    .ldt-st-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: rgba(128, 128, 128, 0.15); }
+    .ldt-st-seg { display: block; min-width: 4px; }
+    .ldt-st-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 5px; font-size: 11px; color: var(--c-font-dim, #8a8a8a); }
+    .ldt-st-lg i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+    .ldt-st-act { display: flex; gap: 3px; align-items: flex-end; height: 70px; }
+    .ldt-st-col { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; }
+    .ldt-st-all { background: rgba(224, 85, 85, 0.55); border-radius: 2px 2px 0 0; display: flex; flex-direction: column; justify-content: flex-end; min-height: 1px; }
+    .ldt-st-ok { background: #4caf50; border-radius: 2px 2px 0 0; }
+    .ldt-st-day { font-size: 9px; text-align: center; color: var(--c-font-dimmer, #777); margin-top: 2px; }
+    .ldt-st-tbl { width: 100%; border-collapse: collapse; }
+    .ldt-st-tbl th { text-align: left; font-size: 10.5px; font-weight: 600; color: var(--c-font-dim, #8a8a8a); padding: 3px 4px; border-bottom: 1px solid rgba(128, 128, 128, 0.25); }
+    .ldt-st-tbl td { padding: 4px; border-bottom: 1px solid rgba(128, 128, 128, 0.12); vertical-align: middle; white-space: nowrap; }
+    .ldt-st-name { cursor: pointer; white-space: normal !important; }
+    .ldt-st-name:hover b { text-decoration: underline; }
+    .ldt-st-name b { color: var(--c-font-clear, #ddd); font-weight: 600; }
+    .ldt-st-name span { white-space: nowrap; color: var(--c-font-dim, #8a8a8a); font-size: 11px; }
+    .ldt-st-chip { display: inline-block; padding: 0 6px; border-radius: 8px; font-size: 10.5px; font-weight: 600; color: #111; }
+    .ldt-st-hist i { display: inline-block; width: 5px; height: 9px; margin-right: 1px; border-radius: 1px; vertical-align: -1px; }
+    .ldt-st-hist i.ok { background: #4caf50; } .ldt-st-hist i.bad { background: #e05555; }
+    .ldt-st-due { color: #e8833a; font-weight: 600; }
+    .ldt-st-dim { color: var(--c-font-dim, #8a8a8a); }
+    tr.ldt-st-skip { opacity: 0.45; }
+    .ldt-st-reset { margin-top: 12px; }
     .ldt-skipbtn {
       display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px; cursor: pointer;
       font-size: 12px; line-height: 1.45; vertical-align: 1px; user-select: none;
@@ -349,6 +380,9 @@
       btn.title = all ? 'Practise every line of this chapter' : 'Practise only the lines below the move you are on. Go to the first move to practise everything.';
       grp.appendChild(btn);
     }
+    if (treeOn && data.root.children.length) {
+      grp.appendChild(button(statsOn ? '🌳 Tree' : '📊 Stats', () => { statsOn = !statsOn; schedule(true); }));
+    }
     grp.appendChild(button(treeOn ? 'Show Lichess list' : 'Show decision tree', () => {
       treeOn = !treeOn;
       store.set(KEYS.treeOn, treeOn ? '1' : '0');
@@ -356,7 +390,174 @@
     }));
     bar.appendChild(grp);
     box.appendChild(bar);
-    if (treeOn) box.appendChild(treeEl(data, data.active));
+    if (treeOn) box.appendChild(statsOn ? statsEl(data) : treeEl(data, data.active));
+  }
+
+  // =====================================================================
+  // STATISTICS (practice results of this chapter)
+  // =====================================================================
+  const LEVEL_NAMES = ['learning', '10 min', '1 day', '3 days', '1 week', '3 weeks'];
+  const LEVEL_COLORS_SR = ['#e05555', '#e8833a', '#d9b43a', '#9bbf3a', '#4caf50', '#2e8b57'];
+
+  function statsEl(data) {
+    const wrap = el('div', 'ldt-stats');
+    const rec = srLoad();
+    const log = srLogLoad();
+    const now = Date.now();
+    const local = loadSkipped();
+    const leaves = leavesUnder(data, data.root);
+    const rows = leaves.map(l => {
+      const r = rec[l];
+      return { leaf: l, r, skipped: isSkippedPath(l, data, local), name: leafName(data, l) };
+    });
+    const seen = rows.filter(x => x.r);
+    const attempts = seen.reduce((s, x) => s + (x.r.n || 0), 0);
+    const firstTry = seen.reduce((s, x) => s + (x.r.ok || 0), 0);
+    const due = rows.filter(x => !x.skipped && (!x.r || x.r.due <= now)).length;
+    const mastered = seen.filter(x => x.r.box >= 4).length;
+    const days = Object.keys(log).sort();
+    const last30 = days.filter(d => d >= dayKey(now - 29 * 86400000));
+    const n30 = last30.reduce((s, d) => s + log[d].n, 0);
+    const ok30 = last30.reduce((s, d) => s + log[d].ok, 0);
+
+    // --- summary tiles
+    const tiles = el('div', 'ldt-st-tiles');
+    const tile = (big, small, title) => {
+      const t = el('div', 'ldt-st-tile');
+      t.append(el('div', 'ldt-st-big', big), el('div', 'ldt-st-small', small));
+      if (title) t.title = title;
+      tiles.appendChild(t);
+    };
+    tile(`${seen.length}/${leaves.length}`, 'lines practised');
+    tile(String(due), 'due now', 'Lines whose repetition interval has passed (or never practised), skipped lines not counted');
+    tile(String(mastered), 'mastered', 'Level "1 week" or higher');
+    tile(attempts ? Math.round(100 * firstTry / attempts) + ' %' : '-', 'first-try rate', 'Lines finished without a mistake or help, all time');
+    tile(n30 ? Math.round(100 * ok30 / n30) + ' %' : '-', 'last 30 days', 'First-try rate over the last 30 days');
+    tile(String(days.length), 'practice days', days.length ? 'Last: ' + days[days.length - 1] : '');
+    wrap.appendChild(tiles);
+
+    // --- level distribution
+    wrap.appendChild(el('div', 'ldt-st-h', 'Levels (repetition interval)'));
+    const dist = el('div', 'ldt-st-dist');
+    const counts = [0, 0, 0, 0, 0, 0];
+    seen.forEach(x => counts[Math.min(x.r.box, 5)]++);
+    const fresh = leaves.length - seen.length;
+    const segs = [['new', fresh, 'rgba(128,128,128,0.35)']].concat(counts.map((c, i) => [LEVEL_NAMES[i], c, LEVEL_COLORS_SR[i]]));
+    const barEl = el('div', 'ldt-st-bar');
+    const legend = el('div', 'ldt-st-legend');
+    segs.forEach(([name, c, col]) => {
+      if (c) {
+        const s = el('span', 'ldt-st-seg');
+        s.style.flexGrow = c; s.style.background = col; s.title = `${name}: ${c}`;
+        barEl.appendChild(s);
+      }
+      const lg = el('span', 'ldt-st-lg');
+      const sw = el('i'); sw.style.background = col;
+      lg.append(sw, document.createTextNode(`${name} ${c}`));
+      legend.appendChild(lg);
+    });
+    dist.append(barEl, legend);
+    wrap.appendChild(dist);
+
+    // --- activity, last 14 days
+    wrap.appendChild(el('div', 'ldt-st-h', 'Last 14 days'));
+    const act = el('div', 'ldt-st-act');
+    const maxN = Math.max(1, ...Array.from({ length: 14 }, (_, i) => (log[dayKey(now - (13 - i) * 86400000)] || { n: 0 }).n));
+    for (let i = 13; i >= 0; i--) {
+      const k = dayKey(now - i * 86400000);
+      const d = log[k] || { n: 0, ok: 0 };
+      const col = el('div', 'ldt-st-col');
+      col.title = `${k}: ${d.n} lines, ${d.ok} first try`;
+      const all = el('div', 'ldt-st-all'); all.style.height = (100 * d.n / maxN) + '%';
+      const good = el('div', 'ldt-st-ok'); good.style.height = d.n ? (100 * d.ok / d.n) + '%' : '0';
+      all.appendChild(good);
+      col.append(all, el('div', 'ldt-st-day', k.slice(8)));
+      act.appendChild(col);
+    }
+    wrap.appendChild(act);
+    const actLg = el('div', 'ldt-st-legend');
+    [['#4caf50', 'first try'], ['rgba(224, 85, 85, 0.55)', 'with mistake or help']].forEach(([c, n]) => {
+      const lg = el('span', 'ldt-st-lg'); const sw = el('i'); sw.style.background = c;
+      lg.append(sw, document.createTextNode(n)); actLg.appendChild(lg);
+    });
+    wrap.appendChild(actLg);
+
+    // --- lines, weakest / most overdue first
+    wrap.appendChild(el('div', 'ldt-st-h', 'Lines'));
+    const tbl = el('table', 'ldt-st-tbl');
+    const hdr = el('tr');
+    ['Line', 'Level', 'First try', 'Tries', 'Next'].forEach(h => hdr.appendChild(el('th', '', h)));
+    tbl.appendChild(hdr);
+    const score = x => {
+      if (x.skipped) return 1e15;
+      if (!x.r) return 5e14;                         // never practised: after the due/weak ones
+      return (x.r.due <= now ? 0 : 1e13) + x.r.box * 1e11 + (x.r.n ? 1e10 * x.r.ok / x.r.n : 0);
+    };
+    rows.slice().sort((a, b) => score(a) - score(b)).forEach(x => {
+      const tr = el('tr', x.skipped ? 'ldt-st-skip' : '');
+      const nameTd = el('td', 'ldt-st-name');
+      nameTd.append(el('b', '', x.name.title), document.createTextNode(' '), el('span', '', x.name.moves));
+      nameTd.title = 'Show this line in the tree';
+      nameTd.addEventListener('click', () => { statsOn = false; navigateTo(x.leaf); schedule(true); });
+      tr.appendChild(nameTd);
+      if (!x.r) {
+        tr.append(el('td', 'ldt-st-dim', x.skipped ? 'skipped' : 'new'), el('td', '', '-'), el('td', '', '0'), el('td', '', x.skipped ? '' : 'now'));
+      } else {
+        const lv = el('td');
+        const chip = el('span', 'ldt-st-chip', LEVEL_NAMES[Math.min(x.r.box, 5)]);
+        chip.style.background = LEVEL_COLORS_SR[Math.min(x.r.box, 5)];
+        lv.appendChild(chip);
+        const rate = x.r.n ? Math.round(100 * (x.r.ok || 0) / x.r.n) + ' %' : '-';
+        const histTd = el('td');
+        histTd.appendChild(document.createTextNode(rate + ' '));
+        if (x.r.hist) {
+          const h = el('span', 'ldt-st-hist');
+          h.title = 'Last tries, oldest → newest (green = first try)';
+          for (const c of x.r.hist.slice(-8)) h.appendChild(el('i', c === '1' ? 'ok' : 'bad'));
+          histTd.appendChild(h);
+        }
+        tr.append(lv, histTd, el('td', '', String(x.r.n || 1)),
+          el('td', x.r.due <= now ? 'ldt-st-due' : '', x.skipped ? 'skipped' : relTime(x.r.due - now)));
+      }
+      tbl.appendChild(tr);
+    });
+    wrap.appendChild(tbl);
+
+    // --- reset
+    const reset = button('Reset statistics of this chapter', () => {
+      if (reset.dataset.armed) {
+        store.del(srKey()); store.del(KEYS.srlog + location.pathname); schedule(true);
+      } else {
+        reset.dataset.armed = '1'; reset.textContent = 'Click again to delete all statistics of this chapter';
+        setTimeout(() => { if (reset.isConnected) { delete reset.dataset.armed; reset.textContent = 'Reset statistics of this chapter'; } }, 4000);
+      }
+    });
+    reset.classList.add('ldt-st-reset');
+    wrap.appendChild(reset);
+    return wrap;
+  }
+
+  // name of a line: its most specific label + the last few moves
+  function leafName(data, leaf) {
+    let title = '';
+    const moves = [];
+    for (let k = 2; k <= leaf.length; k += 2) {
+      const n = data.nodes.get(leaf.slice(0, k));
+      if (!n) continue;
+      if (n.label) title = n.label;
+      moves.push({ san: n.san, ply: data.rootPly + n.depth });
+    }
+    // last three moves, "8...cxd5 9.O-O O-O" style
+    const tail = moves.slice(-3).map((m, i) =>
+      (i === 0 || m.ply % 2 === 1) ? moveText(m.san, m.ply) : m.san);
+    return { title: title || 'Main line', moves: tail.join('\u00a0') };
+  }
+  function relTime(ms) {
+    if (ms <= 0) return 'now';
+    const m = ms / 60000;
+    if (m < 60) return 'in ' + Math.ceil(m) + ' min';
+    if (m < 1440) return 'in ' + Math.round(m / 60) + ' h';
+    return 'in ' + Math.round(m / 1440) + ' d';
   }
 
   function collapsedKey() { return KEYS.collapsed + location.pathname; }
@@ -1105,8 +1306,26 @@
     const r = rec[leaf] || { box: 0, due: 0 };
     r.box = ok ? Math.min(r.box + 1, SR_INTERVALS_MIN.length - 1) : 0;
     r.due = Date.now() + SR_INTERVALS_MIN[r.box] * 60000;
+    r.n = (r.n || 0) + 1;            // attempts
+    r.ok = (r.ok || 0) + (ok ? 1 : 0); // first-try successes
+    r.last = Date.now();
+    r.hist = ((r.hist || '') + (ok ? '1' : '0')).slice(-20); // recent results, newest last
     rec[leaf] = r;
     store.set(srKey(), JSON.stringify(rec));
+    // daily activity for the chapter
+    const log = srLogLoad();
+    const day = dayKey(Date.now());
+    const d = log[day] || { n: 0, ok: 0 };
+    d.n++; if (ok) d.ok++;
+    log[day] = d;
+    store.set(KEYS.srlog + location.pathname, JSON.stringify(log));
+  }
+  function srLogLoad() {
+    try { return JSON.parse(store.get(KEYS.srlog + location.pathname, '{}')) || {}; } catch (e) { return {}; }
+  }
+  function dayKey(ms) {
+    const d = new Date(ms);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
 
   // ---------- helpers ----------

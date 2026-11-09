@@ -49,6 +49,20 @@ Click **▶ Practice** to drill the lines of the chapter.
 
 While practising, Lichess's variation buttons under the move list are hidden, since they would show the possible moves. Tip: close the opening explorer and the engine while practising, they would give the answers away.
 
+## Statistics
+
+**📊 Stats** (next to the Practice button) switches the tree to the practice statistics of the chapter; **🌳 Tree** switches back.
+
+![Statistics](images/stats.png)
+
+- **Summary:** lines practised, lines due now, mastered lines (repetition interval of a week or more), first-try rate overall and over the last 30 days, number of practice days.
+- **Levels:** how many lines sit at each spaced-repetition interval (new → learning → 10 min → 1 day → 3 days → 1 week → 3 weeks). A line moves up one level when finished on the first try and drops back to *learning* after a mistake, a hint or Show answer.
+- **Last 14 days:** lines practised per day, first try vs. with mistakes or help.
+- **Lines:** every line of the chapter with its level, first-try rate, the last 8 tries (green / red), number of tries and when it's due next. Lines due now and the weakest ones come first; skipped lines are at the bottom. Click a line to open it in the tree.
+- **Reset statistics of this chapter** (click twice) deletes the chapter's results.
+
+Results are recorded in every line order (not only *Spaced repetition*) and stored in your browser, per chapter.
+
 ## Install
 
 1. Install the **Tampermonkey** extension ([Chrome Web Store](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo), also available for Firefox, Edge and Safari).
