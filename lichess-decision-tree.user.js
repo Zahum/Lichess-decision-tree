@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.5.1
+// @version      2.6.0
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -33,7 +33,7 @@
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.5.1';
+  const VERSION = '2.6.0';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -49,6 +49,12 @@
   style.textContent = `
     .analyse__moves.ldt-on .tview2 { display: none !important; }
     body.ldt-practicing .analyse__fork { display: none !important; }
+    /* arrows, circles and board glyphs would give the answer away while practising */
+    body.ldt-hide-shapes .cg-wrap svg.cg-shapes,
+    body.ldt-hide-shapes .cg-wrap svg.cg-shapes-below,
+    body.ldt-hide-shapes .cg-wrap svg.cg-custom-svgs,
+    body.ldt-hide-shapes .cg-wrap svg.cg-custom-below,
+    body.ldt-hide-shapes .cg-wrap cg-auto-pieces { visibility: hidden !important; }
     .ldt-forktag {
       pointer-events: none; display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 9px;
       font-size: 11px; font-weight: 600; line-height: 1.6; align-self: center;
@@ -195,6 +201,8 @@
 
     const data = parseMoveList(tview);
     if (document.body.classList.contains('ldt-practicing') !== !!practice) document.body.classList.toggle('ldt-practicing', !!practice);
+    const hideShapes = !!practice && shapesHidden();
+    if (document.body.classList.contains('ldt-hide-shapes') !== hideShapes) document.body.classList.toggle('ldt-hide-shapes', hideShapes);
     if (!practice) decorateFork(data);
     if (practice) practiceTick(data);
 
@@ -515,7 +523,7 @@
       queue: [], idx: 0, results: new Map(),
       target: null, cur: '', mistakes: 0, revealed: false,
       expecting: null, feedback: null, browsing: false, showTree: false,
-      roundDone: false, junk: false, recRestore: false, timer: 0, version: 0, keepFeedback: false, resetStuck: false,
+      roundDone: false, junk: false, recRestore: false, timer: 0, version: 0, keepFeedback: false, resetStuck: false, hint: false,
     };
     switchRecOff();
     buildQueue();
@@ -566,6 +574,7 @@
     p.revealed = false;
     p.feedback = null;
     p.keepFeedback = false;
+    p.hint = false;
     p.browsing = false;
     p.roundDone = false;
     p.cur = '';
@@ -643,6 +652,7 @@
   // the board reached p.cur: decide what comes next
   function arrive() {
     const p = practice;
+    p.hint = false;
     const node = nodeOf(p.cur);
     if (!node || !node.children.length) {
       const ok = p.mistakes === 0 && !p.revealed;
@@ -656,7 +666,7 @@
       } else {
         p.feedback = ok
           ? { type: 'good', text: '✓ Line complete, first try. Next line in a moment…' }
-          : { type: 'warn', text: `Line complete with ${p.mistakes || 'a revealed'} ${p.mistakes > 1 ? 'mistakes' : p.mistakes ? 'mistake' : 'answer'}. Next line in a moment…` };
+          : { type: 'warn', text: p.mistakes ? `Line complete with ${p.mistakes} ${p.mistakes > 1 ? 'mistakes' : 'mistake'}. Next line in a moment…` : 'Line complete with help (hint or answer). Next line in a moment…' };
         p.timer = setTimeout(() => { if (practice === p) startLine(next); }, NEXT_LINE_DELAY);
       }
       bump();
@@ -681,6 +691,34 @@
     const under = p.queue.filter(l => l === path || l.startsWith(path));
     const pick = under.find(l => !p.results.has(l)) || under[0];
     if (pick) { p.target = pick; p.idx = p.queue.indexOf(pick); }
+  }
+
+  // board drawings stay hidden while you have to find the move (shown for a hint, while looking around, or once the line is done)
+  function shapesHidden() {
+    const p = practice;
+    if (!p || p.hint || p.browsing) return false;
+    const node = nodeOf(p.cur);
+    return !!(node && node.children.length);
+  }
+  function boardShapeCount() {
+    const wrap = document.querySelector('.main-board .cg-wrap') || document.querySelector('.cg-wrap');
+    if (!wrap) return 0;
+    return wrap.querySelectorAll('svg.cg-shapes > g > g, svg.cg-shapes-below > g > g').length;
+  }
+  function showHint() {
+    const p = practice;
+    const node = nodeOf(p.cur);
+    if (!node || !node.children.length || !userToMove(p.cur)) return;
+    if (!boardShapeCount()) {
+      p.feedback = { type: 'info', text: '💡 No arrows or circles for this position.' };
+      bump();
+      return;
+    }
+    p.hint = true;
+    p.revealed = true;
+    p.keepFeedback = true;
+    p.feedback = { type: 'warn', text: '💡 Hint shown on the board.' };
+    bump();
   }
 
   function showAnswer() {
@@ -786,7 +824,10 @@
     const btns = el('div', 'ldt-btns');
     btns.appendChild(button('◀ Previous line', () => startLine(p.idx - 1)));
     if (node && !node.children.length) btns.appendChild(button('↺ Repeat line', () => startLine(p.idx)));
-    else btns.appendChild(button('👁 Show answer', showAnswer));
+    else {
+      btns.appendChild(button('💡 Hint', showHint));
+      btns.appendChild(button('👁 Show answer', showAnswer));
+    }
     btns.appendChild(button(p.showTree ? '🌳 Hide tree' : '🌳 Show tree', () => { p.showTree = !p.showTree; bump(); }));
     if (p.roundDone) btns.appendChild(button('↻ New round', () => { buildQueue(); startLine(0); }));
     else btns.appendChild(button('Next line ▶', () => startLine(p.idx + 1 >= p.queue.length ? 0 : p.idx + 1)));

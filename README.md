@@ -35,6 +35,7 @@ Click **▶ Practice** to drill the lines of the chapter.
 - The tree is hidden. You see only the **line played so far**, with `3. ?` where your move is due.
 - The script plays the opponent's moves and **rotates through all his responses**, so every line (from the start to the end of a variation) comes up.
 - You play your moves on the board. A wrong move is **taken back** and counted; **Show answer** reveals the move.
+- **Arrows and circles** you drew in the study are **hidden** while you have to find the move. **💡 Hint** shows them for the current position (it counts as help, like Show answer). Tip: draw threats and plans on the position *after* the opponent's move, so they appear as a hint exactly when you are to move. Once a line is finished, the drawings are visible again.
 - If you have more than one move in a position (e.g. `3.d3` and `3.d4`), **either is accepted** and the drill continues down that branch.
 - **Progress bar:** one segment per line (green = first try, red = mistakes). Click a segment to jump to that line.
 - **◀ Previous line / Next line ▶ / ↺ Repeat line**, **🌳 Show tree** at any time, and click a move of the played line to look at that position.
