@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.7.0
+// @version      2.8.0
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -29,11 +29,12 @@
     comments: 'ldt-comments',
     recRestore: 'ldt-rec-restore',
     collapsed: 'ldt-collapsed:',
+    skipped: 'ldt-skipped:',
     sr: 'ldt-sr:',
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.7.0';
+  const VERSION = '2.8.0';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -170,6 +171,17 @@
     }
     .ldt-fold:hover { background: rgba(128, 128, 128, 0.18); }
     .ldt-fold.open { opacity: 0.25; transition: opacity 0.15s; }
+    .ldt-skipbtn {
+      display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px; cursor: pointer;
+      font-size: 12px; line-height: 1.45; vertical-align: 1px; user-select: none;
+      color: var(--c-font-dim, #8a8a8a); opacity: 0; transition: opacity 0.15s;
+    }
+    .ldt-row:hover .ldt-skipbtn { opacity: 0.8; }
+    .ldt-skipbtn:hover { background: rgba(128, 128, 128, 0.18); }
+    .ldt-skipbtn.on { opacity: 1; color: #e05555; }
+    /* dim the skipped line's content, not the tree's leader lines */
+    li.ldt-skipped > *, .ldt-tree > .ldt-row.ldt-skipped, .ldt-tree > .ldt-row.ldt-skipped ~ * { opacity: 0.45; }
+    li.ldt-skipped li.ldt-skipped > * { opacity: 1; }
     .ldt-row:hover .ldt-fold.open { opacity: 1; }
   `;
   document.head.appendChild(style);
@@ -272,6 +284,8 @@
         const parts = [...el.querySelectorAll(':scope > span:not(.by)')].map(s => s.textContent.trim());
         let text = parts.join(' ').trim() || el.textContent.trim();
         // a comment starting with [Name] names the line: "[Scotch game] White pushes..."
+        // "#skip" anywhere in a comment leaves this line out of practice
+        if (/(^|\s)#skip\b/i.test(text)) { last.skipC = true; text = text.replace(/(^|\s)#skip\b/gi, ' ').replace(/\s+/g, ' ').trim(); }
         const named = text.match(/^\[([^\[\]]{1,60})\]\s*([\s\S]*)$/);
         if (named) { last.label = named[1].trim(); text = named[2].trim(); }
         // "short || longer explanation": the short part goes in the tree, the rest in the Notes panel
@@ -307,7 +321,7 @@
     }
 
     const signature = order
-      .map(n => n.p + '\u0001' + n.san + '\u0001' + n.glyphs.join('') + '\u0001' + n.label + '\u0001' + n.comments.join('\u0002') + '\u0001' + n.context.join('\u0002'))
+      .map(n => n.p + '\u0001' + n.san + '\u0001' + n.glyphs.join('') + '\u0001' + n.label + '\u0001' + n.comments.join('\u0002') + '\u0001' + n.context.join('\u0002') + (n.skipC ? '\u0001s' : ''))
       .join('\u0003') + '\u0004' + active + '\u0004' + root.comments.join('\u0002') + '\u0004' + rootPly;
 
     return { root, nodes, active, rootPly, signature };
@@ -326,8 +340,9 @@
     }
     if (data.root.children.length) {
       const sc = practiceScope(data);
-      const all = sc.leaves.length === countLeaves(data, data.root);
-      const txt = all ? '▶ Practice all' : `▶ Practice: ${sc.name} (${sc.leaves.length} ${sc.leaves.length === 1 ? 'line' : 'lines'})`;
+      const all = !sc.path;
+      let txt = all ? '▶ Practice all' : `▶ Practice: ${sc.name} (${sc.leaves.length} ${sc.leaves.length === 1 ? 'line' : 'lines'})`;
+      if (sc.skippedCount) txt += ` · ${sc.skippedCount} skipped`;
       const btn = button(txt, () => startPractice(data));
       btn.title = all ? 'Practise every line of this chapter' : 'Practise only the lines below the move you are on. Go to the first move to practise everything.';
       grp.appendChild(btn);
@@ -346,6 +361,26 @@
   function loadCollapsed() {
     try { return new Set(JSON.parse(store.get(collapsedKey(), '[]'))); } catch (e) { return new Set(); }
   }
+  function skippedKey() { return KEYS.skipped + location.pathname; }
+  function loadSkipped() {
+    try { return new Set(JSON.parse(store.get(skippedKey(), '[]'))); } catch (e) { return new Set(); }
+  }
+  function toggleSkipped(path) {
+    const set = loadSkipped();
+    if (set.has(path)) set.delete(path); else set.add(path);
+    store.set(skippedKey(), JSON.stringify([...set]));
+    schedule(true);
+  }
+  // a line is skipped when any move on its way is marked (#skip in the comment, or the ⊘ button)
+  function isSkippedPath(path, data, local) {
+    for (let k = 2; k <= path.length; k += 2) {
+      const p = path.slice(0, k);
+      const n = data.nodes.get(p);
+      if ((n && n.skipC) || local.has(p)) return true;
+    }
+    return false;
+  }
+
   function setCollapsed(paths) {
     store.set(collapsedKey(), JSON.stringify(paths));
     schedule(true);
@@ -371,6 +406,7 @@
 
   function treeEl(data, active) {
     data.collapsed = loadCollapsed();
+    data.skipped = loadSkipped();
     const tree = el('div', 'ldt-tree');
     if (data.root.comments.length) tree.appendChild(commentEl(data.root.comments));
     const first = data.root.children;
@@ -408,6 +444,15 @@
       fold.addEventListener('click', e => { e.stopPropagation(); toggleCollapsed(start.p); });
       row.appendChild(fold);
     }
+    // skip this line (and everything below it) in practice
+    const byComment = moves.some(m => m.skipC);
+    const skipped = byComment || (data.skipped && data.skipped.has(start.p));
+    const skip = el('span', 'ldt-skipbtn' + (skipped ? ' on' : ''), '⊘');
+    skip.title = byComment ? 'Skipped in practice (#skip in the study comment)'
+      : skipped ? 'Skipped in practice - click to include it again' : 'Skip this line in practice';
+    if (!byComment) skip.addEventListener('click', e => { e.stopPropagation(); toggleSkipped(start.p); });
+    row.appendChild(skip);
+    if (skipped) row.classList.add('ldt-skipped');
     const out = [row];
     if (shown) out.push(commentEl(shown.comments));
     if (hasChoices && !folded) out.push(branchList(cur.children, data, active, level + 1));
@@ -422,7 +467,9 @@
     const ul = el('ul');
     for (const child of children) {
       const li = el('li');
-      li.append(...segment(child, data, active, level));
+      const parts = segment(child, data, active, level);
+      if (parts[0].classList.contains('ldt-skipped')) li.classList.add('ldt-skipped');
+      li.append(...parts);
       ul.appendChild(li);
     }
     return ul;
@@ -567,8 +614,13 @@
     let path = data.active || '';
     let node = path ? data.nodes.get(path) : data.root;
     if (!node) { path = ''; node = data.root; }
-    const leaves = leavesUnder(data, node);
-    if (leaves.length === countLeaves(data, data.root)) return { path: '', leaves, name: 'all lines' };
+    const all = leavesUnder(data, node);
+    const local = loadSkipped();
+    let leaves = all.filter(l => !isSkippedPath(l, data, local));
+    // standing on a skipped line and starting practice there means: practise it anyway
+    if (!leaves.length) leaves = all;
+    const skippedCount = all.length - leaves.length;
+    if (all.length === countLeaves(data, data.root)) return { path: '', leaves, name: 'all lines', skippedCount };
     // 1) a name in the move's own row (the run of moves between two branch points)
     let rowStart = node;
     while (rowStart.parent && rowStart.parent !== data.root && rowStart.parent.children.length === 1) rowStart = rowStart.parent;
@@ -584,7 +636,7 @@
       const mv = moveText(rowStart.san, data.rootPly + rowStart.depth);
       name = above ? above + ' · ' + mv : 'after ' + mv;
     }
-    return { path, leaves, name };
+    return { path, leaves, name, skippedCount };
   }
 
   function startPractice(data) {
@@ -698,7 +750,9 @@
       if (p.snap.nodes.has(active) && !p.queue.some(l => l === active || l.startsWith(active))) {
         // in the repertoire, but outside the lines being practised
         p.keepFeedback = true;
-        p.feedback = { type: 'warn', text: '↩ That move is in your repertoire, but outside "' + p.scope.name + '". Play the move for this line.' };
+        p.feedback = { type: 'warn', text: p.scope.path
+          ? '↩ That move is in your repertoire, but outside "' + p.scope.name + '" or skipped. Play the move for this line.'
+          : '↩ That move is in your repertoire, but its line is skipped in practice. Play the other move.' };
         jumpTo(p.cur);
         bump();
       } else if (p.snap.nodes.has(active)) {
