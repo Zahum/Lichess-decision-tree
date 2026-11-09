@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.6.0
+// @version      2.7.0
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -33,7 +33,7 @@
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.6.0';
+  const VERSION = '2.7.0';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -49,6 +49,20 @@
   style.textContent = `
     .analyse__moves.ldt-on .tview2 { display: none !important; }
     body.ldt-practicing .analyse__fork { display: none !important; }
+    body.ldt-notes-on .mchat { display: none !important; }
+    .ldt-notes {
+      display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+      background: var(--c-bg-box, #262421); border-radius: 4px; font-size: 13px;
+    }
+    .ldt-notes-head {
+      padding: 7px 12px; font-size: 12px; font-weight: 600; color: var(--c-font-dim, #8a8a8a);
+      border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+    }
+    .ldt-notes-head b { color: var(--c-font-clear, #ddd); margin-left: 4px; }
+    .ldt-notes-body { padding: 10px 12px 14px; line-height: 1.5; overflow-y: auto; color: var(--c-font, #bababa); }
+    .ldt-notes-from { font-size: 11px; color: var(--c-font-dimmer, #777); margin-bottom: 6px; }
+    .ldt-notes-empty { color: var(--c-font-dimmer, #777); font-style: italic; }
+    .ldt-box > .ldt-notes { margin: 6px 10px 12px; border: 1px solid rgba(128, 128, 128, 0.25); }
     /* arrows, circles and board glyphs would give the answer away while practising */
     body.ldt-hide-shapes .cg-wrap svg.cg-shapes,
     body.ldt-hide-shapes .cg-wrap svg.cg-shapes-below,
@@ -204,6 +218,7 @@
     const hideShapes = !!practice && shapesHidden();
     if (document.body.classList.contains('ldt-hide-shapes') !== hideShapes) document.body.classList.toggle('ldt-hide-shapes', hideShapes);
     if (!practice) decorateFork(data);
+    renderNotes(data, box);
     if (practice) practiceTick(data);
 
     const signature = (practice ? 'P' + practice.version : treeOn ? '1' : '0') + data.signature;
@@ -218,7 +233,7 @@
 
   // ---------- read Lichess's move list ----------
   function parseMoveList(tview) {
-    const root = { p: '', san: '', glyphs: [], children: [], comments: [], label: '', depth: 0 };
+    const root = { p: '', san: '', glyphs: [], children: [], comments: [], context: [], label: '', depth: 0 };
     const nodes = new Map();
     const order = [];
     let active = null;
@@ -238,6 +253,7 @@
             glyphs: [...el.querySelectorAll('glyph')].map(g => g.textContent.trim()).filter(Boolean),
             children: [],
             comments: [],
+            context: [],
             label: '',
             depth: p.length / 2,
           };
@@ -258,6 +274,13 @@
         // a comment starting with [Name] names the line: "[Scotch game] White pushes..."
         const named = text.match(/^\[([^\[\]]{1,60})\]\s*([\s\S]*)$/);
         if (named) { last.label = named[1].trim(); text = named[2].trim(); }
+        // "short || longer explanation": the short part goes in the tree, the rest in the Notes panel
+        const cut = text.indexOf('||');
+        if (cut !== -1) {
+          const more = text.slice(cut + 2).trim();
+          text = text.slice(0, cut).trim();
+          if (more) last.context.push(more);
+        }
         if (text) last.comments.push(text);
       }
     }
@@ -284,7 +307,7 @@
     }
 
     const signature = order
-      .map(n => n.p + '\u0001' + n.san + '\u0001' + n.glyphs.join('') + '\u0001' + n.label + '\u0001' + n.comments.join('\u0002'))
+      .map(n => n.p + '\u0001' + n.san + '\u0001' + n.glyphs.join('') + '\u0001' + n.label + '\u0001' + n.comments.join('\u0002') + '\u0001' + n.context.join('\u0002'))
       .join('\u0003') + '\u0004' + active + '\u0004' + root.comments.join('\u0002') + '\u0004' + rootPly;
 
     return { root, nodes, active, rootPly, signature };
@@ -470,6 +493,61 @@
       if (tag.className !== want) tag.className = want;
       if (color && tag.style.getPropertyValue('--ldt-lv') !== color) tag.style.setProperty('--ldt-lv', color);
     });
+  }
+
+  // ---------- Notes panel: the longer explanations ("short || long") ----------
+  // shown in place of the study chat (or under the tree when there is no chat)
+  let lastNotesKey = '';
+  function renderNotes(data, box) {
+    let path = data.active || '';
+    if (practice) path = practice.cur; // only what has been played
+    const showText = !practice || practice.comments;
+    // the explanation of the current move, or the nearest one above it
+    let from = null;
+    for (let n = path ? data.nodes.get(path) : data.root; n; n = n.parent) {
+      if (n.context && n.context.length) { from = n; break; }
+      if (n === data.root) break;
+    }
+    const anyNotes = [...data.nodes.values()].some(n => n.context.length) || data.root.context.length;
+    const chat = document.querySelector('.mchat');
+    let panel = document.querySelector('.ldt-notes');
+    if (!anyNotes) {
+      if (panel) panel.remove();
+      if (document.body.classList.contains('ldt-notes-on')) document.body.classList.remove('ldt-notes-on');
+      lastNotesKey = '';
+      return;
+    }
+    const key = (from ? from.p : '-') + '|' + (from ? from.context.join('\u0002') : '') + '|' + path + '|' + showText + '|' + !!chat;
+    if (panel && key === lastNotesKey && panel.isConnected) return;
+    lastNotesKey = key;
+    if (!panel) panel = el('div', 'ldt-notes');
+    if (chat) {
+      // take the chat's place and size (measured while the chat is still visible)
+      const h = chat.getBoundingClientRect().height;
+      if (h > 50) panel.style.height = h + 'px';
+      if (panel.nextElementSibling !== chat) chat.parentNode.insertBefore(panel, chat);
+      if (!document.body.classList.contains('ldt-notes-on')) document.body.classList.add('ldt-notes-on');
+    } else if (panel.parentNode !== box) {
+      box.appendChild(panel);
+    }
+    panel.textContent = '';
+    const head = el('div', 'ldt-notes-head', 'Notes');
+    panel.appendChild(head);
+    const body = el('div', 'ldt-notes-body');
+    if (!showText) {
+      body.appendChild(el('div', 'ldt-notes-empty', 'Comments are switched off for practice.'));
+    } else if (!from) {
+      body.appendChild(el('div', 'ldt-notes-empty', 'No notes for this position.'));
+    } else {
+      const here = from.p === path;
+      if (from !== data.root) {
+        const mv = moveText(from.san, data.rootPly + from.depth);
+        head.appendChild(el('b', '', mv + (from.label ? ' · ' + from.label : '')));
+        if (!here) body.appendChild(el('div', 'ldt-notes-from', 'From ' + mv + ' (earlier in this line)'));
+      }
+      for (const txt of from.context) body.appendChild(el('p', '', txt));
+    }
+    panel.appendChild(body);
   }
 
   // =====================================================================
