@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess decision tree
 // @namespace    lichess-decision-tree
-// @version      2.8.0
+// @version      2.9.0
 // @description  Shows the move list of Lichess analysis and studies as a decision tree (every option at a branch point on the same level, leader lines, one comment per row) and adds a practice mode that drills every line of a chapter.
 // @author       Zahum
 // @homepageURL  https://github.com/Zahum/lichess-decision-tree
@@ -34,7 +34,7 @@
   };
   const ORDERS = { tree: 'Tree order', shuffle: 'Shuffled', sr: 'Spaced repetition' };
   const SR_INTERVALS_MIN = [0, 10, 1440, 4320, 10080, 30240]; // 0, 10 min, 1 d, 3 d, 7 d, 21 d
-  const VERSION = '2.8.0';
+  const VERSION = '2.9.0';
   const OPPONENT_DELAY = 450;
   const RESET_TIMEOUT = 1200;
   const NEXT_LINE_DELAY = 1500;
@@ -42,6 +42,7 @@
   let treeOn = store.get(KEYS.treeOn, '1') !== '0';
   let practice = null; // practice session state, null when not practising
   let lastSignature = '';
+  let lastData = null;
   let lastActive = null;
   let scheduled = false;
 
@@ -226,6 +227,7 @@
     if (!practice) restoreRecIfPending();
 
     const data = parseMoveList(tview);
+    lastData = data;
     if (document.body.classList.contains('ldt-practicing') !== !!practice) document.body.classList.toggle('ldt-practicing', !!practice);
     const hideShapes = !!practice && shapesHidden();
     if (document.body.classList.contains('ldt-hide-shapes') !== hideShapes) document.body.classList.toggle('ldt-hide-shapes', hideShapes);
@@ -504,6 +506,34 @@
     if (r.top < view.top + 30 || r.bottom > view.bottom - 10) {
       host.scrollTop += r.top - view.top - (view.height - r.height) / 2;
     }
+  }
+
+  // ---------- arrow keys: up/down move between variations at the same level ----------
+  // (left/right stay Lichess's normal back/forward)
+  window.addEventListener('keydown', e => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    if (!treeOn || practice || !lastData || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    const t = e.target;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    const data = lastData;
+    const node = data.active ? data.nodes.get(data.active) : null;
+    if (!node) return;
+    // the row this move belongs to starts right after the last branch point
+    let rowStart = node;
+    while (rowStart.parent && rowStart.parent !== data.root && rowStart.parent.children.length === 1) rowStart = rowStart.parent;
+    const siblings = rowStart.parent ? rowStart.parent.children : [];
+    e.preventDefault();
+    e.stopPropagation();
+    if (siblings.length < 2) return;
+    const i = siblings.indexOf(rowStart);
+    const j = e.key === 'ArrowDown' ? i + 1 : i - 1;
+    if (j < 0 || j >= siblings.length) return;
+    navigateTo(siblings[j].p);
+  }, true);
+
+  function navigateTo(path) {
+    const target = [...document.querySelectorAll('.analyse__moves .tview2 move[p]')].find(m => m.getAttribute('p') === path);
+    if (target) target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }));
   }
 
   // ---------- names on Lichess's variation buttons (under the move list) ----------

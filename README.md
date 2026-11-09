@@ -8,7 +8,8 @@ A userscript that shows the move list of **Lichess analysis boards and studies a
 - **Forced sequences stay on one row** (e.g. `3...exd4 4.Nxd4 Nxd4 5.Qxd4`). The tree only steps deeper where there is a choice.
 - **Leader lines** connect every level, like a folder tree.
 - **One comment per row:** the row shows its first comment, and switches to the comment of the move you are on. Moves with a hidden comment get a 💬 marker; hover to read it.
-- **Works like the normal list:** click a move to jump to it, right-click for Lichess's move menu, arrow keys work as usual.
+- **Works like the normal list:** click a move to jump to it, right-click for Lichess's move menu, ← → step back and forward as usual.
+- **↑ ↓ move between variations at the same level:** on any move of the row `2...Nc6 3.d4`, ↓ jumps to the next sibling variation (`2...d5`), ↑ to the previous one. (In the Lichess list view and in practice, the arrows behave as normal.)
 - **"Show Lichess list" button** switches back to Lichess's own move list at any time (the choice is remembered).
 
 Lichess's own move list stays in the page (hidden), so the explorer, engine, editing and extensions such as LiChess Tools keep working.
